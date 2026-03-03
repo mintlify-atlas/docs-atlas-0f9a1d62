@@ -1,0 +1,150 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Pion WebRTC",
+  "projectDescription": "A pure Go implementation of the WebRTC API for real-time communication",
+  "theme": "aspen",
+  "primaryColor": "#0ea5e9",
+  "lightColor": "#38bdf8",
+  "darkColor": "#0284c7",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/webrtc-overview",
+              "concepts/peer-connection",
+              "concepts/signaling",
+              "concepts/ice-and-connectivity",
+              "concepts/media-streams",
+              "concepts/data-channels"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/overview",
+              "examples/media-streaming",
+              "examples/data-channels-basic",
+              "examples/save-to-disk",
+              "examples/broadcast",
+              "examples/rtp-forwarder",
+              "examples/simulcast",
+              "examples/ortc"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/setting-engine",
+              "advanced/media-engine",
+              "advanced/interceptors",
+              "advanced/custom-logging",
+              "advanced/ice-configuration",
+              "advanced/webassembly"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/migration-v4",
+              "resources/faq",
+              "resources/troubleshooting",
+              "resources/community"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core API",
+            "pages": [
+              "api/overview",
+              "api/api",
+              "api/peer-connection",
+              "api/configuration",
+              "api/session-description"
+            ]
+          },
+          {
+            "group": "Media",
+            "pages": [
+              "api/rtp-transceiver",
+              "api/rtp-sender",
+              "api/rtp-receiver",
+              "api/track-local",
+              "api/track-remote",
+              "api/media-engine"
+            ]
+          },
+          {
+            "group": "Data Channels",
+            "pages": [
+              "api/data-channel",
+              "api/sctp-transport"
+            ]
+          },
+          {
+            "group": "Transport Layer",
+            "pages": [
+              "api/ice-gatherer",
+              "api/ice-transport",
+              "api/dtls-transport",
+              "api/certificate"
+            ]
+          },
+          {
+            "group": "Statistics",
+            "pages": [
+              "api/stats"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Pure Go implementation with no Cgo dependencies",
+    "W3C WebRTC API compatibility",
+    "Full PeerConnection API with renegotiation support",
+    "Bidirectional audio and video streaming",
+    "Reliable and unreliable DataChannels",
+    "Complete ICE, DTLS, SRTP, and SCTP implementations",
+    "Hardware-accelerated encryption",
+    "Cross-platform support including WebAssembly",
+    "Flexible MediaEngine for codec configuration",
+    "Interceptor API for RTP/RTCP processing",
+    "Built-in support for simulcast and SVC"
+  ],
+  "publicApiSurface": [
+    "PeerConnection - Main WebRTC connection interface",
+    "API - Configuration API with MediaEngine and SettingEngine",
+    "DataChannel - Bidirectional data channel communication",
+    "RTPSender - Send RTP media streams",
+    "RTPReceiver - Receive RTP media streams",
+    "RTPTransceiver - Combined sender/receiver for media",
+    "TrackLocal - Local media track interface",
+    "TrackRemote - Remote media track interface",
+    "ICEGatherer - ICE candidate gathering",
+    "ICETransport - ICE transport layer",
+    "DTLSTransport - DTLS encryption layer",
+    "SCTPTransport - SCTP data channel transport",
+    "MediaEngine - Codec and media format configuration",
+    "SettingEngine - WebRTC stack configuration",
+    "Configuration - PeerConnection configuration",
+    "SessionDescription - SDP session descriptions",
+    "Certificate - DTLS certificates"
+  ]
+}
