@@ -1,0 +1,607 @@
+---
+title: 'Certificate'
+description: 'X.509 certificate management for WebRTC DTLS authentication'
+---
+
+## Overview
+
+The `Certificate` type represents an x509 certificate used to authenticate WebRTC communications. Certificates are used by DTLS to encrypt data sent over the wire.
+
+## Type Definition
+
+```go certificate.go
+type Certificate struct {
+    privateKey crypto.PrivateKey
+    x509Cert   *x509.Certificate
+    statsID    string
+}
+```
+
+## Certificate Generation
+
+### GenerateCertificate
+
+Generates a new X.509 compliant certificate with a default template.
+
+```go certificate.go
+func GenerateCertificate(secretKey crypto.PrivateKey) (*Certificate, error)
+```
+
+<ParamField path="secretKey" type="crypto.PrivateKey" required>
+  Private key to use for the certificate. Supports RSA and ECDSA keys.
+</ParamField>
+
+<ResponseField name="return" type="*Certificate, error">
+  Returns a new Certificate or an error if generation fails
+</ResponseField>
+
+**Example:**
+
+```go
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "github.com/pion/webrtc/v4"
+)
+
+// Generate ECDSA key
+key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+if err != nil {
+    panic(err)
+}
+
+// Generate certificate
+cert, err := webrtc.GenerateCertificate(key)
+if err != nil {
+    panic(err)
+}
+```
+
+### NewCertificate
+
+Generates a new certificate with a custom X.509 template.
+
+```go certificate.go
+func NewCertificate(
+    key crypto.PrivateKey, 
+    tpl x509.Certificate,
+) (*Certificate, error)
+```
+
+<ParamField path="key" type="crypto.PrivateKey" required>
+  Private key to use (RSA or ECDSA)
+</ParamField>
+
+<ParamField path="tpl" type="x509.Certificate" required>
+  X.509 certificate template with custom parameters
+  
+  <Expandable title="Common template fields">
+    <ResponseField name="SerialNumber" type="*big.Int">
+      Unique serial number for the certificate
+    </ResponseField>
+    <ResponseField name="Subject" type="pkix.Name">
+      Subject distinguished name
+    </ResponseField>
+    <ResponseField name="NotBefore" type="time.Time">
+      Certificate validity start time
+    </ResponseField>
+    <ResponseField name="NotAfter" type="time.Time">
+      Certificate validity end time
+    </ResponseField>
+    <ResponseField name="Issuer" type="pkix.Name">
+      Issuer distinguished name
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="*Certificate, error">
+  Returns a new Certificate or an error if creation fails
+</ResponseField>
+
+**Example:**
+
+```go
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "crypto/x509"
+    "crypto/x509/pkix"
+    "math/big"
+    "time"
+    "github.com/pion/webrtc/v4"
+)
+
+key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+
+template := x509.Certificate{
+    SerialNumber: serialNumber,
+    Subject: pkix.Name{
+        CommonName: "my-webrtc-app",
+    },
+    NotBefore: time.Now(),
+    NotAfter:  time.Now().AddDate(1, 0, 0), // Valid for 1 year
+    Issuer: pkix.Name{
+        CommonName: "my-webrtc-app",
+    },
+}
+
+cert, err := webrtc.NewCertificate(key, template)
+if err != nil {
+    panic(err)
+}
+```
+
+### CertificateFromX509
+
+Creates a Certificate from an existing private key and X.509 certificate.
+
+```go certificate.go
+func CertificateFromX509(
+    privateKey crypto.PrivateKey, 
+    certificate *x509.Certificate,
+) Certificate
+```
+
+<ParamField path="privateKey" type="crypto.PrivateKey" required>
+  The private key associated with the certificate
+</ParamField>
+
+<ParamField path="certificate" type="*x509.Certificate" required>
+  The X.509 certificate
+</ParamField>
+
+<ResponseField name="return" type="Certificate">
+  Returns a Certificate instance
+</ResponseField>
+
+**Example:**
+
+```go
+// Assuming you have an existing key and cert
+cert := webrtc.CertificateFromX509(existingKey, existingCert)
+
+// Use across multiple peer connections
+pc1, _ := api.NewPeerConnection(webrtc.Configuration{
+    Certificates: []webrtc.Certificate{cert},
+})
+pc2, _ := api.NewPeerConnection(webrtc.Configuration{
+    Certificates: []webrtc.Certificate{cert},
+})
+```
+
+## PEM Encoding/Decoding
+
+### CertificateFromPEM
+
+Creates a certificate from PEM-encoded strings.
+
+```go certificate.go
+func CertificateFromPEM(pems string) (*Certificate, error)
+```
+
+<ParamField path="pems" type="string" required>
+  String containing PEM blocks for the private key and X.509 certificate
+</ParamField>
+
+<ResponseField name="return" type="*Certificate, error">
+  Returns a Certificate or an error if parsing fails
+</ResponseField>
+
+**Example:**
+
+```go
+pemString := `-----BEGIN CERTIFICATE-----
+MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
+...
+-----END CERTIFICATE-----
+-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgVcB/UNPxalR9zDdE
+...
+-----END PRIVATE KEY-----`
+
+cert, err := webrtc.CertificateFromPEM(pemString)
+if err != nil {
+    panic(err)
+}
+```
+
+### PEM
+
+Encodes the certificate as PEM blocks.
+
+```go certificate.go
+func (c Certificate) PEM() (string, error)
+```
+
+<ResponseField name="return" type="string, error">
+  Returns PEM-encoded certificate and private key, or an error
+</ResponseField>
+
+**Example:**
+
+```go
+cert, _ := webrtc.GenerateCertificate(key)
+
+pemString, err := cert.PEM()
+if err != nil {
+    panic(err)
+}
+
+// Save to file
+ioutil.WriteFile("cert.pem", []byte(pemString), 0600)
+
+// Load later
+loadedPEM, _ := ioutil.ReadFile("cert.pem")
+loadedCert, _ := webrtc.CertificateFromPEM(string(loadedPEM))
+```
+
+## Methods
+
+### GetFingerprints
+
+Returns the certificate fingerprints used for DTLS verification.
+
+```go certificate.go
+func (c Certificate) GetFingerprints() ([]DTLSFingerprint, error)
+```
+
+<ResponseField name="return" type="[]DTLSFingerprint, error">
+  Returns a list of fingerprints (currently SHA-256) or an error
+  
+  <Expandable title="DTLSFingerprint structure">
+    <ResponseField name="Algorithm" type="string">
+      Hash algorithm name (e.g., "sha-256")
+    </ResponseField>
+    <ResponseField name="Value" type="string">
+      Colon-separated hex fingerprint value
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```go
+cert, _ := webrtc.GenerateCertificate(key)
+
+fingerprints, err := cert.GetFingerprints()
+if err != nil {
+    panic(err)
+}
+
+for _, fp := range fingerprints {
+    fmt.Printf("%s: %s\n", fp.Algorithm, fp.Value)
+    // Output: sha-256: AA:BB:CC:DD:EE:FF:...
+}
+```
+
+### Expires
+
+Returns the timestamp after which the certificate is no longer valid.
+
+```go certificate.go
+func (c Certificate) Expires() time.Time
+```
+
+<ResponseField name="return" type="time.Time">
+  Returns the expiration timestamp, or zero time if not set
+</ResponseField>
+
+**Example:**
+
+```go
+cert, _ := webrtc.GenerateCertificate(key)
+
+expiresAt := cert.Expires()
+fmt.Printf("Certificate expires: %s\n", expiresAt)
+fmt.Printf("Days until expiration: %.0f\n", time.Until(expiresAt).Hours()/24)
+
+if time.Now().After(expiresAt) {
+    fmt.Println("Certificate has expired!")
+}
+```
+
+### Equals
+
+Determines if two certificates are identical.
+
+```go certificate.go
+func (c Certificate) Equals(cert Certificate) bool
+```
+
+<ParamField path="cert" type="Certificate" required>
+  Certificate to compare against
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns true if certificates are identical (same key and X.509 cert)
+</ResponseField>
+
+**Example:**
+
+```go
+cert1, _ := webrtc.GenerateCertificate(key1)
+cert2, _ := webrtc.GenerateCertificate(key2)
+
+if cert1.Equals(*cert2) {
+    fmt.Println("Certificates are identical")
+} else {
+    fmt.Println("Certificates are different")
+}
+```
+
+## Key Types
+
+Pion WebRTC supports the following private key types:
+
+### ECDSA (Recommended)
+
+```go
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+)
+
+// P-256 curve (most common)
+key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+// P-384 curve (stronger)
+key, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+```
+
+### RSA
+
+```go
+import (
+    "crypto/rand"
+    "crypto/rsa"
+)
+
+// 2048-bit key
+key, err := rsa.GenerateKey(rand.Reader, 2048)
+
+// 4096-bit key (stronger but slower)
+key, err := rsa.GenerateKey(rand.Reader, 4096)
+```
+
+<Note>
+ECDSA with P-256 is recommended for WebRTC as it provides good security with better performance than RSA.
+</Note>
+
+## Usage Examples
+
+<CodeGroup>
+```go Basic Usage
+package main
+
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Generate key
+    key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Generate certificate
+    cert, err := webrtc.GenerateCertificate(key)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Get fingerprints
+    fingerprints, err := cert.GetFingerprints()
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("Certificate fingerprint: %s\n", fingerprints[0].Value)
+    fmt.Printf("Expires: %s\n", cert.Expires())
+    
+    // Use in PeerConnection
+    api := webrtc.NewAPI()
+    pc, err := api.NewPeerConnection(webrtc.Configuration{
+        Certificates: []webrtc.Certificate{*cert},
+    })
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+}
+```
+
+```go Persistence with PEM
+package main
+
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "io/ioutil"
+    "os"
+    "github.com/pion/webrtc/v4"
+)
+
+func loadOrCreateCertificate(filename string) (*webrtc.Certificate, error) {
+    // Try to load existing certificate
+    if data, err := ioutil.ReadFile(filename); err == nil {
+        return webrtc.CertificateFromPEM(string(data))
+    }
+    
+    // Generate new certificate
+    key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    if err != nil {
+        return nil, err
+    }
+    
+    cert, err := webrtc.GenerateCertificate(key)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Save to file
+    pemData, err := cert.PEM()
+    if err != nil {
+        return nil, err
+    }
+    
+    if err := ioutil.WriteFile(filename, []byte(pemData), 0600); err != nil {
+        return nil, err
+    }
+    
+    return cert, nil
+}
+
+func main() {
+    cert, err := loadOrCreateCertificate("webrtc-cert.pem")
+    if err != nil {
+        panic(err)
+    }
+    
+    // Use the certificate...
+}
+```
+
+```go Shared Certificate
+package main
+
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Generate one certificate
+    key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    cert, _ := webrtc.GenerateCertificate(key)
+    
+    api := webrtc.NewAPI()
+    
+    // Share across multiple peer connections
+    pc1, _ := api.NewPeerConnection(webrtc.Configuration{
+        Certificates: []webrtc.Certificate{*cert},
+    })
+    defer pc1.Close()
+    
+    pc2, _ := api.NewPeerConnection(webrtc.Configuration{
+        Certificates: []webrtc.Certificate{*cert},
+    })
+    defer pc2.Close()
+    
+    // Both connections use the same certificate
+    // This can be useful for identifying the same peer
+}
+```
+
+```go Custom Validity Period
+package main
+
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "crypto/x509"
+    "crypto/x509/pkix"
+    "math/big"
+    "time"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    
+    serialNumber, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+    
+    // Create certificate valid for 1 year
+    template := x509.Certificate{
+        SerialNumber: serialNumber,
+        Subject: pkix.Name{
+            CommonName:   "WebRTC Peer",
+            Organization: []string{"My Organization"},
+        },
+        NotBefore: time.Now(),
+        NotAfter:  time.Now().AddDate(1, 0, 0), // 1 year
+        Issuer: pkix.Name{
+            CommonName: "WebRTC Peer",
+        },
+        Version: 2,
+    }
+    
+    cert, err := webrtc.NewCertificate(key, template)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Use the certificate...
+}
+```
+</CodeGroup>
+
+## Security Best Practices
+
+<Warning>
+Always transmit certificate fingerprints over a secure, authenticated signaling channel to prevent man-in-the-middle attacks.
+</Warning>
+
+### Certificate Storage
+
+- Store private keys securely with appropriate file permissions (e.g., 0600)
+- Consider using hardware security modules (HSMs) for production deployments
+- Rotate certificates periodically
+
+### Fingerprint Verification
+
+- Always verify the remote peer's certificate fingerprint
+- Use SHA-256 or stronger hash algorithms
+- Implement fingerprint pinning for additional security
+
+### Certificate Lifetime
+
+- Default generated certificates are valid for 1 month
+- For production, consider longer validity periods (but not too long)
+- Implement monitoring for certificate expiration
+- Have a certificate rotation strategy
+
+## Error Handling
+
+Common errors when working with certificates:
+
+```go
+cert, err := webrtc.GenerateCertificate(key)
+if err != nil {
+    // Handle errors:
+    // - ErrPrivateKeyType: Unsupported key type
+    // - Cryptographic errors during generation
+}
+
+fingerprints, err := cert.GetFingerprints()
+if err != nil {
+    // Handle errors:
+    // - ErrFailedToGenerateCertificateFingerprint
+}
+
+pemCert, err := cert.PEM()
+if err != nil {
+    // Handle errors:
+    // - Failed to encode certificate or private key
+}
+```
+
+## See Also
+
+- [DTLSTransport](/api/dtls-transport) - Uses certificates for DTLS
+- [PeerConnection](/api/peer-connection) - High-level API with automatic certificate handling
+- [RFC 5245](https://datatracker.ietf.org/doc/html/rfc5245) - ICE specification
+- [RFC 5763](https://datatracker.ietf.org/doc/html/rfc5763) - DTLS for SRTP

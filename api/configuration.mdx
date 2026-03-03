@@ -1,0 +1,493 @@
+---
+title: Configuration
+description: Configure ICE servers, transport policies, and certificates for PeerConnection
+---
+
+## Overview
+
+A `Configuration` defines how peer-to-peer communication via PeerConnection is established or re-established. Configurations may be set up once and reused across multiple connections.
+
+<Info>
+  Source: `configuration.go:9-59`
+</Info>
+
+<Note>
+  Configurations are treated as readonly. As long as they are unmodified, they are safe for concurrent use.
+</Note>
+
+## Type Definition
+
+```go
+type Configuration struct {
+    ICEServers                  []ICEServer
+    ICETransportPolicy          ICETransportPolicy
+    BundlePolicy                BundlePolicy
+    RTCPMuxPolicy               RTCPMuxPolicy
+    PeerIdentity                string
+    Certificates                []Certificate
+    ICECandidatePoolSize        uint8
+    SDPSemantics                SDPSemantics
+    AlwaysNegotiateDataChannels bool
+}
+```
+
+## Fields
+
+### ICEServers
+
+<ParamField path="ICEServers" type="[]ICEServer">
+  Defines a slice describing servers available to be used by ICE, such as STUN and TURN servers.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:15-17`
+</Info>
+
+ICE servers help with NAT traversal and relay traffic when direct peer-to-peer connections aren't possible.
+
+```go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+        {
+            URLs:       []string{"turn:turn.example.com:3478"},
+            Username:   "user",
+            Credential: "pass",
+        },
+    },
+}
+```
+
+<Tip>
+  STUN servers help discover your public IP address, while TURN servers relay traffic when direct connections fail.
+</Tip>
+
+### ICETransportPolicy
+
+<ParamField path="ICETransportPolicy" type="ICETransportPolicy">
+  Indicates which candidates the ICEAgent is allowed to use.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:19-21`
+</Info>
+
+Possible values:
+- `ICETransportPolicyAll` (default) - All candidates may be used
+- `ICETransportPolicyRelay` - Only relay candidates (TURN) may be used
+
+```go
+config := webrtc.Configuration{
+    ICETransportPolicy: webrtc.ICETransportPolicyRelay,
+}
+```
+
+<Warning>
+  Using `ICETransportPolicyRelay` requires a TURN server and prevents direct peer-to-peer connections.
+</Warning>
+
+### BundlePolicy
+
+<ParamField path="BundlePolicy" type="BundlePolicy">
+  Indicates which media-bundling policy to use when gathering ICE candidates.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:23-25`
+</Info>
+
+Possible values:
+- `BundlePolicyBalanced` (default)
+- `BundlePolicyMaxBundle` - Bundle all media on a single transport
+- `BundlePolicyMaxCompat` - Use separate transports for each media type
+
+```go
+config := webrtc.Configuration{
+    BundlePolicy: webrtc.BundlePolicyMaxBundle,
+}
+```
+
+### RTCPMuxPolicy
+
+<ParamField path="RTCPMuxPolicy" type="RTCPMuxPolicy">
+  Indicates which RTCP-mux policy to use when gathering ICE candidates.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:27-29`
+</Info>
+
+Possible values:
+- `RTCPMuxPolicyRequire` (default) - Only gather RTCP candidates for multiplexed RTCP
+- `RTCPMuxPolicyNegotiate` - Gather ICE candidates for both RTP and RTCP
+
+```go
+config := webrtc.Configuration{
+    RTCPMuxPolicy: webrtc.RTCPMuxPolicyRequire,
+}
+```
+
+<Note>
+  Modern WebRTC implementations typically use `RTCPMuxPolicyRequire` to multiplex RTP and RTCP on the same port.
+</Note>
+
+### PeerIdentity
+
+<ParamField path="PeerIdentity" type="string">
+  Sets the target peer identity for the PeerConnection. The PeerConnection will not establish a connection to a remote peer unless it can be successfully authenticated with the provided name.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:31-34`
+</Info>
+
+```go
+config := webrtc.Configuration{
+    PeerIdentity: "user@example.com",
+}
+```
+
+### Certificates
+
+<ParamField path="Certificates" type="[]Certificate">
+  Describes a set of certificates that the PeerConnection uses to authenticate.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:36-47`
+</Info>
+
+Valid values are created through calls to the `GenerateCertificate` function. If this value is absent, a default set of certificates is generated for each PeerConnection instance.
+
+```go
+// Generate a custom certificate
+cert, err := webrtc.GenerateCertificate(privateKey)
+if err != nil {
+    return err
+}
+
+config := webrtc.Configuration{
+    Certificates: []webrtc.Certificate{*cert},
+}
+```
+
+<CodeGroup>
+```go Default Certificate
+// Certificates are auto-generated if not provided
+config := webrtc.Configuration{}
+pc, err := webrtc.NewPeerConnection(config)
+```
+
+```go Custom Certificate
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+)
+
+// Generate ECDSA key
+sk, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+if err != nil {
+    return err
+}
+
+// Create certificate
+cert, err := webrtc.GenerateCertificate(sk)
+if err != nil {
+    return err
+}
+
+config := webrtc.Configuration{
+    Certificates: []webrtc.Certificate{*cert},
+}
+```
+</CodeGroup>
+
+<Warning>
+  Although any given DTLS connection will use only one certificate, this attribute allows multiple certificates that support different algorithms. Certificates cannot be modified after the PeerConnection is created.
+</Warning>
+
+### ICECandidatePoolSize
+
+<ParamField path="ICECandidatePoolSize" type="uint8">
+  Describes the size of the prefetched ICE pool.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:49-50`
+</Info>
+
+Setting this to a non-zero value allows ICE candidates to be gathered before calling `CreateOffer()` or `CreateAnswer()`.
+
+```go
+config := webrtc.Configuration{
+    ICECandidatePoolSize: 1,
+}
+```
+
+<Note>
+  Currently, pool sizes greater than 1 are not supported and will result in an error.
+</Note>
+
+### SDPSemantics
+
+<ParamField path="SDPSemantics" type="SDPSemantics">
+  Controls the type of SDP offers accepted by and SDP answers generated by the PeerConnection.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:52-54`
+</Info>
+
+Possible values:
+- `SDPSemanticsUnifiedPlan` (default) - Modern standard
+- `SDPSemanticsPlanB` - Legacy Google Plan B
+- `SDPSemanticsUnifiedPlanWithFallback` - Try Unified Plan, fall back to Plan B
+
+```go
+config := webrtc.Configuration{
+    SDPSemantics: webrtc.SDPSemanticsUnifiedPlan,
+}
+```
+
+<Tip>
+  Use `SDPSemanticsUnifiedPlan` for new applications. Plan B is deprecated but may be needed for compatibility with older implementations.
+</Tip>
+
+### AlwaysNegotiateDataChannels
+
+<ParamField path="AlwaysNegotiateDataChannels" type="bool">
+  Specifies whether the application prefers to always negotiate data channels in the initial SDP offer.
+</ParamField>
+
+<Info>
+  Source: `configuration.go:56-58`
+</Info>
+
+```go
+config := webrtc.Configuration{
+    AlwaysNegotiateDataChannels: true,
+}
+```
+
+<Note>
+  When set to true, a data channel section will be included in the SDP even if no data channels have been created yet.
+</Note>
+
+## Usage Examples
+
+<AccordionGroup>
+  <Accordion title="Basic Configuration">
+    Minimal configuration with a public STUN server:
+
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+
+    pc, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    ```
+  </Accordion>
+
+  <Accordion title="With TURN Server">
+    Configuration including TURN for relay:
+
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "username",
+                Credential: "password",
+            },
+        },
+    }
+
+    pc, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    ```
+  </Accordion>
+
+  <Accordion title="Relay-Only Configuration">
+    Force all traffic through TURN (no direct connections):
+
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "username",
+                Credential: "password",
+            },
+        },
+        ICETransportPolicy: webrtc.ICETransportPolicyRelay,
+    }
+
+    pc, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    ```
+  </Accordion>
+
+  <Accordion title="Complete Configuration">
+    Full configuration with all options:
+
+    ```go
+    import (
+        "crypto/ecdsa"
+        "crypto/elliptic"
+        "crypto/rand"
+    )
+
+    // Generate certificate
+    sk, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    cert, _ := webrtc.GenerateCertificate(sk)
+
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "user",
+                Credential: "pass",
+            },
+        },
+        ICETransportPolicy:          webrtc.ICETransportPolicyAll,
+        BundlePolicy:                webrtc.BundlePolicyMaxBundle,
+        RTCPMuxPolicy:               webrtc.RTCPMuxPolicyRequire,
+        PeerIdentity:                "",
+        Certificates:                []webrtc.Certificate{*cert},
+        ICECandidatePoolSize:        1,
+        SDPSemantics:                webrtc.SDPSemanticsUnifiedPlan,
+        AlwaysNegotiateDataChannels: false,
+    }
+
+    pc, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Modifying Configuration
+
+After creating a PeerConnection, you can update certain configuration properties:
+
+```go
+// Get current configuration
+currentConfig := pc.GetConfiguration()
+
+// Modify ICE servers
+currentConfig.ICEServers = []webrtc.ICEServer{
+    {
+        URLs: []string{"stun:new-stun.example.com:19302"},
+    },
+}
+
+// Apply updated configuration
+err := pc.SetConfiguration(currentConfig)
+if err != nil {
+    // Handle error - some properties cannot be changed
+}
+```
+
+<Warning>
+  **Immutable Properties**: The following cannot be modified after creation:
+  - `Certificates`
+  - `BundlePolicy`
+  - `RTCPMuxPolicy`
+  - `ICECandidatePoolSize` (after SetLocalDescription)
+  - `PeerIdentity`
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use STUN for Discovery" icon="compass">
+    Always include at least one STUN server to discover your public IP address for NAT traversal.
+  </Card>
+
+  <Card title="Include TURN for Reliability" icon="shield">
+    Add a TURN server for scenarios where direct connections fail (strict firewalls, symmetric NATs).
+  </Card>
+
+  <Card title="Reuse Configurations" icon="recycle">
+    Create one configuration and reuse it across multiple PeerConnections to save resources.
+  </Card>
+
+  <Card title="Test Relay-Only" icon="flask">
+    Test with `ICETransportPolicyRelay` to verify your TURN server works before production.
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### Environment-Based Configuration
+
+```go
+func getConfig(env string) webrtc.Configuration {
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+
+    if env == "production" {
+        config.ICEServers = append(config.ICEServers, webrtc.ICEServer{
+            URLs:       []string{"turn:turn.prod.example.com:3478"},
+            Username:   os.Getenv("TURN_USERNAME"),
+            Credential: os.Getenv("TURN_PASSWORD"),
+        })
+    }
+
+    return config
+}
+```
+
+### Configuration Validation
+
+```go
+func validateConfig(config webrtc.Configuration) error {
+    if len(config.ICEServers) == 0 {
+        return errors.New("at least one ICE server required")
+    }
+
+    for _, server := range config.ICEServers {
+        if len(server.URLs) == 0 {
+            return errors.New("ICE server must have at least one URL")
+        }
+    }
+
+    return nil
+}
+```
+
+## See Also
+
+- [PeerConnection](/api/peer-connection) - Using Configuration with PeerConnection
+- [API](/api/api) - API-level configuration
+- [ICE Servers](https://webrtc.org/getting-started/turn-server) - Setting up STUN/TURN servers

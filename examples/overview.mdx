@@ -1,0 +1,126 @@
+---
+title: "Examples Overview"
+description: "Explore comprehensive Pion WebRTC examples covering media streaming, data channels, and advanced use cases"
+---
+
+Pion WebRTC provides an extensive collection of examples covering common use-cases. You can modify and extend these examples to get started quickly with real-time communication in Go.
+
+## Getting Started
+
+All examples can be run locally using the examples server:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/pion/webrtc.git webrtc
+    cd webrtc/examples
+    ```
+  </Step>
+  
+  <Step title="Run the examples server">
+    ```bash
+    go run examples.go
+    ```
+    
+    You can change the port using the `--address` flag:
+    ```bash
+    go run examples.go --address localhost:8080
+    go run examples.go --address :8080  # listen on all interfaces
+    ```
+  </Step>
+  
+  <Step title="Access the examples">
+    Browse to [localhost](http://localhost) to explore all available examples
+  </Step>
+</Steps>
+
+## Media API Examples
+
+Examples demonstrating audio and video streaming capabilities:
+
+<CardGroup cols={2}>
+  <Card title="Media Streaming" icon="play" href="/examples/media-streaming">
+    Send video and audio from disk to your browser with frame-by-frame control
+  </Card>
+  
+  <Card title="Save to Disk" icon="floppy-disk" href="/examples/save-to-disk">
+    Record webcam and microphone streams and save them as VP8/Opus files
+  </Card>
+  
+  <Card title="Broadcast" icon="tower-broadcast" href="/examples/broadcast">
+    Broadcast video to multiple peers with single upload using SFU pattern
+  </Card>
+  
+  <Card title="RTP Forwarder" icon="arrows-turn-right" href="/examples/rtp-forwarder">
+    Forward audio/video streams via RTP to external applications
+  </Card>
+  
+  <Card title="Simulcast" icon="layer-group" href="/examples/simulcast">
+    Accept and demux single track with 3 simulcast streams into separate tracks
+  </Card>
+</CardGroup>
+
+## Data Channel API Examples
+
+Examples showing how to use WebRTC data channels for real-time data transfer:
+
+<CardGroup cols={2}>
+  <Card title="Data Channels" icon="message" href="/examples/data-channels-basic">
+    Send and receive DataChannel messages between browser and server
+  </Card>
+  
+  <Card title="ORTC" icon="network-wired" href="/examples/ortc">
+    Use the ORTC API for low-level DataChannel communication control
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion title="WebAssembly Support">
+    Many Pion WebRTC examples support WebAssembly compilation, allowing you to use WebRTC from Go in both server and browser code with minimal changes.
+    
+    To compile an example for WebAssembly:
+    ```bash
+    cd examples/data-channels/jsfiddle
+    GOOS=js GOARCH=wasm go build -o demo.wasm
+    ```
+    
+    The examples server will automatically detect and offer the WebAssembly option.
+  </Accordion>
+  
+  <Accordion title="Signaling Pattern">
+    Most examples use a simple copy-paste signaling mechanism for demonstration purposes:
+    
+    1. Run the example application
+    2. Paste the browser's offer into the terminal
+    3. Copy the answer from terminal to browser
+    
+    <Note>
+      Production applications should implement proper signaling using WebSockets, HTTP polling, or other real-time communication methods.
+    </Note>
+  </Accordion>
+  
+  <Accordion title="ICE Configuration">
+    All examples use Google's public STUN server by default:
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    ```
+    
+    For production deployments, consider using your own STUN/TURN servers.
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Examples
+
+For more full-featured examples using third-party libraries, check out the [example-webrtc-applications](https://github.com/pion/example-webrtc-applications) repository.
+
+<Tip>
+  Each example is self-contained and demonstrates a specific use case. Start with the data channels or media streaming examples to understand the basics, then explore more advanced patterns like simulcast and broadcasting.
+</Tip>

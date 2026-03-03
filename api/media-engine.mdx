@@ -1,0 +1,414 @@
+---
+title: MediaEngine
+description: Defines the codecs and configuration supported by a PeerConnection.
+---
+
+## Overview
+
+MediaEngine defines the codecs supported by a PeerConnection, and the configuration of those codecs. It manages codec registration, negotiation, and header extension configuration.
+
+## Type Definition
+
+```go
+type MediaEngine struct {
+    negotiatedVideo      bool
+    negotiatedAudio      bool
+    negotiateMultiCodecs bool
+    videoCodecs          []RTPCodecParameters
+    audioCodecs          []RTPCodecParameters
+    negotiatedVideoCodecs []RTPCodecParameters
+    negotiatedAudioCodecs []RTPCodecParameters
+    headerExtensions      []mediaEngineHeaderExtension
+    negotiatedHeaderExtensions map[int]mediaEngineHeaderExtension
+    mu sync.RWMutex
+}
+```
+
+## Methods
+
+### RegisterDefaultCodecs
+
+Registers the default codecs supported by Pion WebRTC.
+
+```go
+func (m *MediaEngine) RegisterDefaultCodecs() error
+```
+
+<ResponseField name="error" type="error">
+  Returns error if codec registration fails
+</ResponseField>
+
+<Expandable title="Default Audio Codecs">
+- **Opus** (48kHz, 2 channels) - PayloadType 111
+- **G.722** (8kHz) - PayloadType 9
+- **PCMU** (8kHz) - PayloadType 0
+- **PCMA** (8kHz) - PayloadType 8
+</Expandable>
+
+<Expandable title="Default Video Codecs">
+- **VP8** - PayloadType 96 (with RTX at 97)
+- **VP9** Profile 0 - PayloadType 98 (with RTX at 99)
+- **VP9** Profile 2 - PayloadType 100 (with RTX at 101)
+- **H.264** Multiple profiles:
+  - Baseline (profile-level-id=42001f) - PayloadTypes 102, 104
+  - Constrained Baseline (profile-level-id=42e01f) - PayloadTypes 106, 108
+  - Main (profile-level-id=4d001f) - PayloadTypes 127, 39
+  - High (profile-level-id=64001f) - PayloadType 112
+- **H.265** - PayloadType 116 (with RTX at 117)
+- **AV1** - PayloadType 45 (with RTX at 46)
+
+All video codecs include RTCP feedback: goog-remb, ccm fir, nack, nack pli
+</Expandable>
+
+<CodeGroup>
+```go Basic Usage
+m := &webrtc.MediaEngine{}
+if err := m.RegisterDefaultCodecs(); err != nil {
+    panic(err)
+}
+
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+peerConnection, err := api.NewPeerConnection(webrtc.Configuration{})
+```
+</CodeGroup>
+
+### RegisterCodec
+
+Adds a codec to the MediaEngine. These are the list of codecs supported by this PeerConnection.
+
+```go
+func (m *MediaEngine) RegisterCodec(codec RTPCodecParameters, typ RTPCodecType) error
+```
+
+<ParamField path="codec" type="RTPCodecParameters" required>
+  The codec parameters to register
+</ParamField>
+
+<ParamField path="typ" type="RTPCodecType" required>
+  The codec type (RTPCodecTypeAudio or RTPCodecTypeVideo)
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if codec with same payload type already registered or invalid type
+</ResponseField>
+
+<CodeGroup>
+```go Register Custom Codec
+m := &webrtc.MediaEngine{}
+
+// Register only Opus for audio
+err := m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:     webrtc.MimeTypeOpus,
+        ClockRate:    48000,
+        Channels:     2,
+        SDPFmtpLine:  "minptime=10;useinbandfec=1",
+    },
+    PayloadType: 111,
+}, webrtc.RTPCodecTypeAudio)
+if err != nil {
+    panic(err)
+}
+
+// Register only VP8 for video
+err = m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:  webrtc.MimeTypeVP8,
+        ClockRate: 90000,
+        RTCPFeedback: []webrtc.RTCPFeedback{
+            {Type: "nack"},
+            {Type: "nack", Parameter: "pli"},
+        },
+    },
+    PayloadType: 96,
+}, webrtc.RTPCodecTypeVideo)
+```
+</CodeGroup>
+
+### RegisterHeaderExtension
+
+Adds a header extension to the MediaEngine. To determine the negotiated value use GetHeaderExtensionID after signaling is complete.
+
+```go
+func (m *MediaEngine) RegisterHeaderExtension(
+    extension RTPHeaderExtensionCapability,
+    typ RTPCodecType,
+    allowedDirections ...RTPTransceiverDirection,
+) error
+```
+
+<ParamField path="extension" type="RTPHeaderExtensionCapability" required>
+  The header extension capability to register
+</ParamField>
+
+<ParamField path="typ" type="RTPCodecType" required>
+  The codec type (audio or video)
+</ParamField>
+
+<ParamField path="allowedDirections" type="...RTPTransceiverDirection">
+  Optional list of allowed transceiver directions. Defaults to sendonly and recvonly.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if direction is invalid (must be sendonly or recvonly)
+</ResponseField>
+
+<CodeGroup>
+```go Register Extensions
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+// Register audio level extension for audio
+err := m.RegisterHeaderExtension(
+    webrtc.RTPHeaderExtensionCapability{URI: webrtc.AudioLevelExtensionURI},
+    webrtc.RTPCodecTypeAudio,
+)
+
+// Register transport-cc for video (both directions)
+err = m.RegisterHeaderExtension(
+    webrtc.RTPHeaderExtensionCapability{URI: webrtc.TransportCCExtensionURI},
+    webrtc.RTPCodecTypeVideo,
+    webrtc.RTPTransceiverDirectionSendonly,
+    webrtc.RTPTransceiverDirectionRecvonly,
+)
+```
+</CodeGroup>
+
+### RegisterFeedback
+
+Adds feedback mechanism to already registered codecs.
+
+```go
+func (m *MediaEngine) RegisterFeedback(feedback RTCPFeedback, typ RTPCodecType)
+```
+
+<ParamField path="feedback" type="RTCPFeedback" required>
+  The RTCP feedback to add
+</ParamField>
+
+<ParamField path="typ" type="RTPCodecType" required>
+  The codec type to add feedback to
+</ParamField>
+
+<CodeGroup>
+```go Add Feedback
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+// Add REMB feedback to all video codecs
+m.RegisterFeedback(
+    webrtc.RTCPFeedback{Type: "goog-remb"},
+    webrtc.RTPCodecTypeVideo,
+)
+
+// Add transport-cc feedback
+m.RegisterFeedback(
+    webrtc.RTCPFeedback{Type: "transport-cc"},
+    webrtc.RTPCodecTypeVideo,
+)
+```
+</CodeGroup>
+
+## Usage Examples
+
+### Custom Codec Configuration
+
+```go
+// Create MediaEngine with only specific codecs
+m := &webrtc.MediaEngine{}
+
+// Audio: Only Opus
+m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:     webrtc.MimeTypeOpus,
+        ClockRate:    48000,
+        Channels:     2,
+        SDPFmtpLine:  "minptime=10;useinbandfec=1",
+    },
+    PayloadType: 111,
+}, webrtc.RTPCodecTypeAudio)
+
+// Video: Only H.264 Baseline
+m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:     webrtc.MimeTypeH264,
+        ClockRate:    90000,
+        SDPFmtpLine:  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+        RTCPFeedback: []webrtc.RTCPFeedback{
+            {Type: "nack"},
+            {Type: "nack", Parameter: "pli"},
+            {Type: "ccm", Parameter: "fir"},
+        },
+    },
+    PayloadType: 102,
+}, webrtc.RTPCodecTypeVideo)
+
+// Create API with custom MediaEngine
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+```
+
+### VP8 Only Configuration
+
+```go
+m := &webrtc.MediaEngine{}
+
+// Register VP8 only
+if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:  webrtc.MimeTypeVP8,
+        ClockRate: 90000,
+        RTCPFeedback: []webrtc.RTCPFeedback{
+            {Type: "goog-remb"},
+            {Type: "ccm", Parameter: "fir"},
+            {Type: "nack"},
+            {Type: "nack", Parameter: "pli"},
+        },
+    },
+    PayloadType: 96,
+}, webrtc.RTPCodecTypeVideo); err != nil {
+    panic(err)
+}
+
+// Register RTX for VP8
+if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:    webrtc.MimeTypeRTX,
+        ClockRate:   90000,
+        SDPFmtpLine: "apt=96",
+    },
+    PayloadType: 97,
+}, webrtc.RTPCodecTypeVideo); err != nil {
+    panic(err)
+}
+
+// Register Opus for audio
+if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: webrtc.RTPCodecCapability{
+        MimeType:  webrtc.MimeTypeOpus,
+        ClockRate: 48000,
+        Channels:  2,
+    },
+    PayloadType: 111,
+}, webrtc.RTPCodecTypeAudio); err != nil {
+    panic(err)
+}
+
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+```
+
+### Registering Header Extensions
+
+```go
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+// Common header extensions
+extensions := []struct {
+    uri  string
+    typ  webrtc.RTPCodecType
+}{
+    {webrtc.SDESMidURI, webrtc.RTPCodecTypeVideo},
+    {webrtc.SDESRTPStreamIDURI, webrtc.RTPCodecTypeVideo},
+    {webrtc.TransportCCExtensionURI, webrtc.RTPCodecTypeVideo},
+    {webrtc.AudioLevelExtensionURI, webrtc.RTPCodecTypeAudio},
+}
+
+for _, ext := range extensions {
+    if err := m.RegisterHeaderExtension(
+        webrtc.RTPHeaderExtensionCapability{URI: ext.uri},
+        ext.typ,
+    ); err != nil {
+        panic(err)
+    }
+}
+
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+```
+
+### Multiple Codec Negotiation
+
+```go
+m := &webrtc.MediaEngine{}
+
+// Enable multi-codec negotiation (allows codec switching during session)
+m.setMultiCodecNegotiation(true)
+
+// Register multiple video codecs
+videoCodecs := []struct {
+    mime        string
+    payloadType webrtc.PayloadType
+    fmtp        string
+}{
+    {webrtc.MimeTypeVP8, 96, ""},
+    {webrtc.MimeTypeVP9, 98, "profile-id=0"},
+    {webrtc.MimeTypeH264, 102, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f"},
+}
+
+for _, codec := range videoCodecs {
+    m.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:    codec.mime,
+            ClockRate:   90000,
+            SDPFmtpLine: codec.fmtp,
+        },
+        PayloadType: codec.payloadType,
+    }, webrtc.RTPCodecTypeVideo)
+}
+```
+
+### Audio-Only Configuration
+
+```go
+m := &webrtc.MediaEngine{}
+
+// Register only audio codecs
+audioCodecs := []struct {
+    mime        string
+    clockRate   uint32
+    channels    uint16
+    payloadType webrtc.PayloadType
+}{
+    {webrtc.MimeTypeOpus, 48000, 2, 111},
+    {webrtc.MimeTypePCMU, 8000, 0, 0},
+    {webrtc.MimeTypePCMA, 8000, 0, 8},
+}
+
+for _, codec := range audioCodecs {
+    m.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:  codec.mime,
+            ClockRate: codec.clockRate,
+            Channels:  codec.channels,
+        },
+        PayloadType: codec.payloadType,
+    }, webrtc.RTPCodecTypeAudio)
+}
+
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+```
+
+## Common Header Extension URIs
+
+<Expandable title="Video Extensions">
+- `urn:ietf:params:rtp-hdrext:sdes:mid` - Media ID
+- `urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id` - RTP Stream ID
+- `urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id` - Repaired Stream ID
+- `http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time` - Absolute Send Time
+- `http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01` - Transport-wide CC
+- `http://www.webrtc.org/experiments/rtp-hdrext/playout-delay` - Playout Delay
+- `urn:3gpp:video-orientation` - Video Orientation
+</Expandable>
+
+<Expandable title="Audio Extensions">
+- `urn:ietf:params:rtp-hdrext:ssrc-audio-level` - Audio Level
+- `urn:ietf:params:rtp-hdrext:sdes:mid` - Media ID
+- `http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01` - Transport-wide CC
+</Expandable>
+
+## See Also
+
+- [RTPTransceiver](/api/rtp-transceiver) - Uses MediaEngine for codec negotiation
+- [API](/api/api) - Created with MediaEngine using WithMediaEngine option
+- [RTPCodecParameters](https://pkg.go.dev/github.com/pion/webrtc/v4#RTPCodecParameters) - Codec parameter structure

@@ -1,0 +1,632 @@
+---
+title: 'Custom Logging'
+description: 'Implement custom logging for debugging and monitoring'
+---
+
+## Overview
+
+Pion WebRTC provides a customizable logging interface that allows you to integrate with your existing logging infrastructure. You can control log levels, format output, and direct logs to different destinations for each WebRTC subsystem (ICE, DTLS, SCTP, etc.).
+
+<Note>
+  Custom logging is particularly useful for debugging connection issues, monitoring production systems, or integrating with centralized logging platforms.
+</Note>
+
+## Logging Interface
+
+Pion uses the `logging.LeveledLogger` interface from `github.com/pion/logging`:
+
+```go logger-interface.go
+type LeveledLogger interface {
+    Trace(msg string)
+    Tracef(format string, args ...interface{})
+    Debug(msg string)
+    Debugf(format string, args ...interface{})
+    Info(msg string)
+    Infof(format string, args ...interface{})
+    Warn(msg string)
+    Warnf(format string, args ...interface{})
+    Error(msg string)
+    Errorf(format string, args ...interface{})
+}
+```
+
+## LoggerFactory Interface
+
+The `LoggerFactory` creates loggers for different subsystems:
+
+```go factory-interface.go
+type LoggerFactory interface {
+    NewLogger(subsystem string) LeveledLogger
+}
+```
+
+Subsystems include: `ice`, `dtls`, `sctp`, `srtp`, `rtcp`, and more.
+
+## Basic Custom Logger
+
+Here's a complete example of implementing a custom logger:
+
+```go custom-logger.go
+package main
+
+import (
+    "fmt"
+    "github.com/pion/logging"
+    "github.com/pion/webrtc/v4"
+)
+
+// customLogger implements logging.LeveledLogger
+type customLogger struct{}
+
+// Trace logs are typically very verbose
+func (c customLogger) Trace(msg string) {}
+func (c customLogger) Tracef(format string, args ...any) {}
+
+// Debug logs for development and troubleshooting
+func (c customLogger) Debug(msg string) {
+    fmt.Printf("[DEBUG] %s\n", msg)
+}
+
+func (c customLogger) Debugf(format string, args ...any) {
+    c.Debug(fmt.Sprintf(format, args...))
+}
+
+// Info logs for general information
+func (c customLogger) Info(msg string) {
+    fmt.Printf("[INFO] %s\n", msg)
+}
+
+func (c customLogger) Infof(format string, args ...any) {
+    c.Info(fmt.Sprintf(format, args...))
+}
+
+// Warn logs for warnings
+func (c customLogger) Warn(msg string) {
+    fmt.Printf("[WARN] %s\n", msg)
+}
+
+func (c customLogger) Warnf(format string, args ...any) {
+    c.Warn(fmt.Sprintf(format, args...))
+}
+
+// Error logs for errors
+func (c customLogger) Error(msg string) {
+    fmt.Printf("[ERROR] %s\n", msg)
+}
+
+func (c customLogger) Errorf(format string, args ...any) {
+    c.Error(fmt.Sprintf(format, args...))
+}
+
+// customLoggerFactory implements logging.LoggerFactory
+type customLoggerFactory struct{}
+
+func (c customLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    fmt.Printf("Creating logger for subsystem: %s\n", subsystem)
+    return customLogger{}
+}
+
+func main() {
+    // Create SettingEngine with custom logger
+    s := webrtc.SettingEngine{
+        LoggerFactory: customLoggerFactory{},
+    }
+    
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    
+    peerConnection, err := api.NewPeerConnection(webrtc.Configuration{})
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+}
+```
+
+From [examples/custom-logger/main.go:20-64](https://github.com/pion/webrtc/blob/master/examples/custom-logger/main.go:20-64).
+
+## Per-Subsystem Logging
+
+You can create different loggers for each subsystem:
+
+```go per-subsystem.go
+import (
+    "fmt"
+    "log"
+    "os"
+    "github.com/pion/logging"
+)
+
+type subsystemLogger struct {
+    subsystem string
+    logger    *log.Logger
+}
+
+func (s *subsystemLogger) Trace(msg string) {}
+func (s *subsystemLogger) Tracef(format string, args ...any) {}
+
+func (s *subsystemLogger) Debug(msg string) {
+    s.logger.Printf("[%s] DEBUG: %s", s.subsystem, msg)
+}
+
+func (s *subsystemLogger) Debugf(format string, args ...any) {
+    s.Debug(fmt.Sprintf(format, args...))
+}
+
+func (s *subsystemLogger) Info(msg string) {
+    s.logger.Printf("[%s] INFO: %s", s.subsystem, msg)
+}
+
+func (s *subsystemLogger) Infof(format string, args ...any) {
+    s.Info(fmt.Sprintf(format, args...))
+}
+
+func (s *subsystemLogger) Warn(msg string) {
+    s.logger.Printf("[%s] WARN: %s", s.subsystem, msg)
+}
+
+func (s *subsystemLogger) Warnf(format string, args ...any) {
+    s.Warn(fmt.Sprintf(format, args...))
+}
+
+func (s *subsystemLogger) Error(msg string) {
+    s.logger.Printf("[%s] ERROR: %s", s.subsystem, msg)
+}
+
+func (s *subsystemLogger) Errorf(format string, args ...any) {
+    s.Error(fmt.Sprintf(format, args...))
+}
+
+type subsystemLoggerFactory struct{}
+
+func (s subsystemLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    return &subsystemLogger{
+        subsystem: subsystem,
+        logger:    log.New(os.Stdout, "", log.LstdFlags),
+    }
+}
+```
+
+## Logging to File
+
+Direct logs to a file:
+
+```go file-logger.go
+import (
+    "fmt"
+    "log"
+    "os"
+    "github.com/pion/logging"
+    "github.com/pion/webrtc/v4"
+)
+
+type fileLogger struct {
+    logger *log.Logger
+}
+
+func (f *fileLogger) Trace(msg string) {}
+func (f *fileLogger) Tracef(format string, args ...any) {}
+
+func (f *fileLogger) Debug(msg string) {
+    f.logger.Println("DEBUG:", msg)
+}
+
+func (f *fileLogger) Debugf(format string, args ...any) {
+    f.Debug(fmt.Sprintf(format, args...))
+}
+
+func (f *fileLogger) Info(msg string) {
+    f.logger.Println("INFO:", msg)
+}
+
+func (f *fileLogger) Infof(format string, args ...any) {
+    f.Info(fmt.Sprintf(format, args...))
+}
+
+func (f *fileLogger) Warn(msg string) {
+    f.logger.Println("WARN:", msg)
+}
+
+func (f *fileLogger) Warnf(format string, args ...any) {
+    f.Warn(fmt.Sprintf(format, args...))
+}
+
+func (f *fileLogger) Error(msg string) {
+    f.logger.Println("ERROR:", msg)
+}
+
+func (f *fileLogger) Errorf(format string, args ...any) {
+    f.Error(fmt.Sprintf(format, args...))
+}
+
+type fileLoggerFactory struct {
+    file *os.File
+}
+
+func (f *fileLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    return &fileLogger{
+        logger: log.New(f.file, fmt.Sprintf("[%s] ", subsystem), log.LstdFlags),
+    }
+}
+
+func main() {
+    // Open log file
+    logFile, err := os.OpenFile("webrtc.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+    if err != nil {
+        panic(err)
+    }
+    defer logFile.Close()
+    
+    // Create SettingEngine with file logger
+    s := webrtc.SettingEngine{
+        LoggerFactory: &fileLoggerFactory{file: logFile},
+    }
+    
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+    defer peerConnection.Close()
+}
+```
+
+## Structured Logging (JSON)
+
+Integrate with structured logging libraries:
+
+```go json-logger.go
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+    "time"
+    "github.com/pion/logging"
+)
+
+type jsonLogger struct {
+    subsystem string
+}
+
+func (j *jsonLogger) log(level, msg string) {
+    entry := map[string]interface{}{
+        "timestamp": time.Now().Format(time.RFC3339),
+        "level":     level,
+        "subsystem": j.subsystem,
+        "message":   msg,
+    }
+    
+    data, _ := json.Marshal(entry)
+    fmt.Fprintln(os.Stdout, string(data))
+}
+
+func (j *jsonLogger) Trace(msg string) {}
+func (j *jsonLogger) Tracef(format string, args ...any) {}
+
+func (j *jsonLogger) Debug(msg string) {
+    j.log("DEBUG", msg)
+}
+
+func (j *jsonLogger) Debugf(format string, args ...any) {
+    j.Debug(fmt.Sprintf(format, args...))
+}
+
+func (j *jsonLogger) Info(msg string) {
+    j.log("INFO", msg)
+}
+
+func (j *jsonLogger) Infof(format string, args ...any) {
+    j.Info(fmt.Sprintf(format, args...))
+}
+
+func (j *jsonLogger) Warn(msg string) {
+    j.log("WARN", msg)
+}
+
+func (j *jsonLogger) Warnf(format string, args ...any) {
+    j.Warn(fmt.Sprintf(format, args...))
+}
+
+func (j *jsonLogger) Error(msg string) {
+    j.log("ERROR", msg)
+}
+
+func (j *jsonLogger) Errorf(format string, args ...any) {
+    j.Error(fmt.Sprintf(format, args...))
+}
+
+type jsonLoggerFactory struct{}
+
+func (j jsonLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    return &jsonLogger{subsystem: subsystem}
+}
+```
+
+## Using Pion's Default Logger
+
+Pion provides a default logger implementation:
+
+```go default-logger.go
+import (
+    "github.com/pion/logging"
+    "github.com/pion/webrtc/v4"
+)
+
+// Create default logger factory
+loggerFactory := logging.NewDefaultLoggerFactory()
+
+// Set log level
+loggerFactory.DefaultLogLevel = logging.LogLevelDebug
+
+// Use with SettingEngine
+s := webrtc.SettingEngine{
+    LoggerFactory: loggerFactory,
+}
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+```
+
+## Log Levels
+
+Pion supports these log levels:
+
+<Steps>
+  <Step title="Trace">
+    Most verbose - detailed packet-level information
+  </Step>
+  
+  <Step title="Debug">
+    Debugging information - state changes, decisions
+  </Step>
+  
+  <Step title="Info">
+    General information - connection established, etc.
+  </Step>
+  
+  <Step title="Warn">
+    Warnings - recoverable issues
+  </Step>
+  
+  <Step title="Error">
+    Errors - failures and exceptions
+  </Step>
+</Steps>
+
+<Note>
+  Trace logs can be extremely verbose and impact performance. Only enable in development.
+</Note>
+
+## Common Subsystems
+
+These are the subsystems you'll see in logs:
+
+<ParamField path="ice" type="string">
+  ICE agent - candidate gathering, connectivity checks
+</ParamField>
+
+<ParamField path="dtls" type="string">
+  DTLS handshake and encryption
+</ParamField>
+
+<ParamField path="sctp" type="string">
+  SCTP for data channels
+</ParamField>
+
+<ParamField path="srtp" type="string">
+  SRTP encryption/decryption
+</ParamField>
+
+<ParamField path="rtcp" type="string">
+  RTCP packet processing
+</ParamField>
+
+<ParamField path="pc" type="string">
+  PeerConnection lifecycle
+</ParamField>
+
+## Filtering by Subsystem
+
+Only log specific subsystems:
+
+```go filter-subsystem.go
+type filteredLoggerFactory struct {
+    allowedSubsystems map[string]bool
+}
+
+func (f *filteredLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    if f.allowedSubsystems[subsystem] {
+        return customLogger{subsystem: subsystem}
+    }
+    // Return a no-op logger for filtered subsystems
+    return logging.NewDefaultLoggerFactory().NewLogger("noop")
+}
+
+// Only log ICE and DTLS
+factory := &filteredLoggerFactory{
+    allowedSubsystems: map[string]bool{
+        "ice":  true,
+        "dtls": true,
+    },
+}
+```
+
+## Integration with Popular Logging Libraries
+
+### Logrus Integration
+
+```go logrus-integration.go
+import (
+    "github.com/pion/logging"
+    "github.com/sirupsen/logrus"
+)
+
+type logrusLogger struct {
+    entry *logrus.Entry
+}
+
+func (l *logrusLogger) Trace(msg string) {
+    l.entry.Trace(msg)
+}
+
+func (l *logrusLogger) Tracef(format string, args ...any) {
+    l.entry.Tracef(format, args...)
+}
+
+func (l *logrusLogger) Debug(msg string) {
+    l.entry.Debug(msg)
+}
+
+func (l *logrusLogger) Debugf(format string, args ...any) {
+    l.entry.Debugf(format, args...)
+}
+
+func (l *logrusLogger) Info(msg string) {
+    l.entry.Info(msg)
+}
+
+func (l *logrusLogger) Infof(format string, args ...any) {
+    l.entry.Infof(format, args...)
+}
+
+func (l *logrusLogger) Warn(msg string) {
+    l.entry.Warn(msg)
+}
+
+func (l *logrusLogger) Warnf(format string, args ...any) {
+    l.entry.Warnf(format, args...)
+}
+
+func (l *logrusLogger) Error(msg string) {
+    l.entry.Error(msg)
+}
+
+func (l *logrusLogger) Errorf(format string, args ...any) {
+    l.entry.Errorf(format, args...)
+}
+
+type logrusLoggerFactory struct {
+    logger *logrus.Logger
+}
+
+func (l *logrusLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    return &logrusLogger{
+        entry: l.logger.WithField("subsystem", subsystem),
+    }
+}
+
+// Usage
+logrusInstance := logrus.New()
+logrusInstance.SetLevel(logrus.DebugLevel)
+logrusInstance.SetFormatter(&logrus.JSONFormatter{})
+
+factory := &logrusLoggerFactory{logger: logrusInstance}
+```
+
+### Zap Integration
+
+```go zap-integration.go
+import (
+    "github.com/pion/logging"
+    "go.uber.org/zap"
+)
+
+type zapLogger struct {
+    logger *zap.SugaredLogger
+}
+
+func (z *zapLogger) Trace(msg string) {
+    z.logger.Debug(msg) // Zap doesn't have Trace
+}
+
+func (z *zapLogger) Tracef(format string, args ...any) {
+    z.logger.Debugf(format, args...)
+}
+
+func (z *zapLogger) Debug(msg string) {
+    z.logger.Debug(msg)
+}
+
+func (z *zapLogger) Debugf(format string, args ...any) {
+    z.logger.Debugf(format, args...)
+}
+
+func (z *zapLogger) Info(msg string) {
+    z.logger.Info(msg)
+}
+
+func (z *zapLogger) Infof(format string, args ...any) {
+    z.logger.Infof(format, args...)
+}
+
+func (z *zapLogger) Warn(msg string) {
+    z.logger.Warn(msg)
+}
+
+func (z *zapLogger) Warnf(format string, args ...any) {
+    z.logger.Warnf(format, args...)
+}
+
+func (z *zapLogger) Error(msg string) {
+    z.logger.Error(msg)
+}
+
+func (z *zapLogger) Errorf(format string, args ...any) {
+    z.logger.Errorf(format, args...)
+}
+
+type zapLoggerFactory struct {
+    logger *zap.Logger
+}
+
+func (z *zapLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    return &zapLogger{
+        logger: z.logger.Sugar().Named(subsystem),
+    }
+}
+
+// Usage
+zapInstance, _ := zap.NewProduction()
+defer zapInstance.Sync()
+
+factory := &zapLoggerFactory{logger: zapInstance}
+```
+
+## Complete Example
+
+<Accordion title="Full Custom Logger Example">
+See the complete working example at [examples/custom-logger/main.go](https://github.com/pion/webrtc/blob/master/examples/custom-logger/main.go).
+
+This example demonstrates:
+- Implementing `LeveledLogger` interface
+- Creating a `LoggerFactory`
+- Per-subsystem logger creation
+- Integration with SettingEngine
+- Full PeerConnection setup with custom logging
+</Accordion>
+
+## Debugging Tips
+
+<Steps>
+  <Step title="Enable Debug Logs for ICE">
+    Most connection issues are ICE-related. Enable debug logging for the `ice` subsystem.
+  </Step>
+  
+  <Step title="Log DTLS Handshake">
+    Certificate and DTLS issues appear in `dtls` subsystem logs.
+  </Step>
+  
+  <Step title="Monitor SCTP for Data Channels">
+    Data channel issues show up in `sctp` logs.
+  </Step>
+  
+  <Step title="Avoid Trace in Production">
+    Trace logs can significantly impact performance. Use Debug or Info in production.
+  </Step>
+</Steps>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="SettingEngine" icon="gear" href="./setting-engine">
+    Configure advanced WebRTC behavior
+  </Card>
+  <Card title="ICE Configuration" icon="network-wired" href="./ice-configuration">
+    Debug ICE connectivity
+  </Card>
+</CardGroup>

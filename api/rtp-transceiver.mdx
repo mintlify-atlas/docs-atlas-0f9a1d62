@@ -1,0 +1,258 @@
+---
+title: RTPTransceiver
+description: Represents a combination of an RTPSender and an RTPReceiver that share a common mid.
+---
+
+## Overview
+
+RTPTransceiver represents a combination of an RTPSender and an RTPReceiver that share a common mid. It manages the bidirectional flow of media data in a WebRTC connection.
+
+## Type Definition
+
+```go
+type RTPTransceiver struct {
+    mid                    atomic.Value // string
+    sender                 atomic.Value // *RTPSender
+    receiver               atomic.Value // *RTPReceiver
+    direction              atomic.Value // RTPTransceiverDirection
+    currentDirection       atomic.Value // RTPTransceiverDirection
+    currentRemoteDirection atomic.Value // RTPTransceiverDirection
+    codecs                 []RTPCodecParameters
+    kind                   RTPCodecType
+    api                    *API
+    mu                     sync.RWMutex
+}
+```
+
+## Methods
+
+### SetCodecPreferences
+
+Sets the preferred list of supported codecs. If codecs is empty or nil, resets to default from MediaEngine.
+
+```go
+func (t *RTPTransceiver) SetCodecPreferences(codecs []RTPCodecParameters) error
+```
+
+<ParamField path="codecs" type="[]RTPCodecParameters">
+  List of codec parameters to set as preferences. Pass empty slice or nil to reset to defaults.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if codec is not supported by the MediaEngine
+</ResponseField>
+
+<CodeGroup>
+```go Example
+// Set H.264 as the preferred video codec
+codecs := []webrtc.RTPCodecParameters{
+    {
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:  webrtc.MimeTypeH264,
+            ClockRate: 90000,
+        },
+        PayloadType: 102,
+    },
+}
+
+err := transceiver.SetCodecPreferences(codecs)
+if err != nil {
+    panic(err)
+}
+```
+
+```go Reset to Defaults
+// Reset to MediaEngine defaults
+err := transceiver.SetCodecPreferences(nil)
+```
+</CodeGroup>
+
+### Sender
+
+Returns the RTPTransceiver's RTPSender if it has one.
+
+```go
+func (t *RTPTransceiver) Sender() *RTPSender
+```
+
+<ResponseField name="sender" type="*RTPSender">
+  The associated RTPSender, or nil if none exists
+</ResponseField>
+
+### SetSender
+
+Sets the RTPSender and Track to the current transceiver.
+
+```go
+func (t *RTPTransceiver) SetSender(s *RTPSender, track TrackLocal) error
+```
+
+<ParamField path="s" type="*RTPSender" required>
+  The RTPSender to associate with this transceiver
+</ParamField>
+
+<ParamField path="track" type="TrackLocal" required>
+  The local track to send
+</ParamField>
+
+### Receiver
+
+Returns the RTPTransceiver's RTPReceiver if it has one.
+
+```go
+func (t *RTPTransceiver) Receiver() *RTPReceiver
+```
+
+<ResponseField name="receiver" type="*RTPReceiver">
+  The associated RTPReceiver, or nil if none exists
+</ResponseField>
+
+### SetMid
+
+Sets the RTPTransceiver's mid. If it was already set, returns an error.
+
+```go
+func (t *RTPTransceiver) SetMid(mid string) error
+```
+
+<ParamField path="mid" type="string" required>
+  The media ID to set for this transceiver
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if mid is already set
+</ResponseField>
+
+### Mid
+
+Gets the Transceiver's mid value. When not already set, this value will be set in CreateOffer or CreateAnswer.
+
+```go
+func (t *RTPTransceiver) Mid() string
+```
+
+<ResponseField name="mid" type="string">
+  The media ID, or empty string if not yet set
+</ResponseField>
+
+### Kind
+
+Returns the RTPTransceiver's kind (audio or video).
+
+```go
+func (t *RTPTransceiver) Kind() RTPCodecType
+```
+
+<ResponseField name="kind" type="RTPCodecType">
+  The codec type (RTPCodecTypeAudio or RTPCodecTypeVideo)
+</ResponseField>
+
+### Direction
+
+Returns the RTPTransceiver's current direction.
+
+```go
+func (t *RTPTransceiver) Direction() RTPTransceiverDirection
+```
+
+<ResponseField name="direction" type="RTPTransceiverDirection">
+  The current direction (sendrecv, sendonly, recvonly, or inactive)
+</ResponseField>
+
+<Expandable title="RTPTransceiverDirection Values">
+- `RTPTransceiverDirectionSendrecv` - Send and receive
+- `RTPTransceiverDirectionSendonly` - Send only
+- `RTPTransceiverDirectionRecvonly` - Receive only
+- `RTPTransceiverDirectionInactive` - Neither send nor receive
+- `RTPTransceiverDirectionUnknown` - Direction unknown
+</Expandable>
+
+### Stop
+
+Irreversibly stops the RTPTransceiver.
+
+```go
+func (t *RTPTransceiver) Stop() error
+```
+
+<ResponseField name="error" type="error">
+  Returns error if stopping the sender or receiver fails
+</ResponseField>
+
+<CodeGroup>
+```go Example
+transceiver := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo)
+
+// Later...
+if err := transceiver.Stop(); err != nil {
+    panic(err)
+}
+```
+</CodeGroup>
+
+<Note>
+After calling Stop(), the transceiver's direction is set to inactive and cannot be changed.
+</Note>
+
+## Usage Examples
+
+### Creating and Configuring a Transceiver
+
+```go
+// Add a transceiver for video
+transceiver, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+    Direction: webrtc.RTPTransceiverDirectionSendrecv,
+})
+if err != nil {
+    panic(err)
+}
+
+// Check the transceiver properties
+fmt.Println("Mid:", transceiver.Mid())
+fmt.Println("Kind:", transceiver.Kind())
+fmt.Println("Direction:", transceiver.Direction())
+```
+
+### Setting Codec Preferences
+
+```go
+// Prefer VP8 over other video codecs
+codecs := []webrtc.RTPCodecParameters{
+    {
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:  webrtc.MimeTypeVP8,
+            ClockRate: 90000,
+        },
+        PayloadType: 96,
+    },
+}
+
+if err := transceiver.SetCodecPreferences(codecs); err != nil {
+    panic(err)
+}
+```
+
+### Accessing Sender and Receiver
+
+```go
+// Get the sender
+sender := transceiver.Sender()
+if sender != nil {
+    track := sender.Track()
+    fmt.Println("Sender track:", track)
+}
+
+// Get the receiver
+receiver := transceiver.Receiver()
+if receiver != nil {
+    track := receiver.Track()
+    fmt.Println("Receiver track:", track)
+}
+```
+
+## See Also
+
+- [RTPSender](/api/rtp-sender) - Manages outbound RTP streams
+- [RTPReceiver](/api/rtp-receiver) - Manages inbound RTP streams
+- [TrackLocal](/api/track-local) - Local media track interface
+- [TrackRemote](/api/track-remote) - Remote media track

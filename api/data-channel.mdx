@@ -1,0 +1,554 @@
+---
+title: 'DataChannel'
+description: 'WebRTC DataChannel for bidirectional peer-to-peer data transfer'
+---
+
+## Overview
+
+The `DataChannel` represents a network channel for bidirectional peer-to-peer transfers of arbitrary data. Data channels are used to send and receive text and binary data between peers in a WebRTC connection.
+
+## Type Definition
+
+```go
+type DataChannel struct {
+    // Contains filtered or unexported fields
+}
+```
+
+The DataChannel manages reliability, ordering, and message delivery based on its configuration parameters.
+
+## Creating a DataChannel
+
+### NewDataChannel
+
+```go
+func (api *API) NewDataChannel(transport *SCTPTransport, params *DataChannelParameters) (*DataChannel, error)
+```
+
+Creates a new DataChannel. This constructor is part of the ORTC API and is not meant to be used together with the basic WebRTC API.
+
+<ParamField path="transport" type="*SCTPTransport" required>
+  The SCTP transport instance to send data over.
+</ParamField>
+
+<ParamField path="params" type="*DataChannelParameters" required>
+  Configuration parameters for the data channel including label, protocol, ordering, and reliability settings.
+</ParamField>
+
+<ResponseField name="return" type="*DataChannel">
+  The newly created DataChannel instance.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the label exceeds 65535 characters or if the channel cannot be opened.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+params := &webrtc.DataChannelParameters{
+    Label:    "my-channel",
+    Ordered:  true,
+    Protocol: "json",
+}
+
+dc, err := api.NewDataChannel(sctpTransport, params)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+</CodeGroup>
+
+## Properties
+
+### Label
+
+```go
+func (d *DataChannel) Label() string
+```
+
+Returns the label that distinguishes this DataChannel from other DataChannel objects. Scripts can create multiple DataChannel objects with the same label.
+
+### ID
+
+```go
+func (d *DataChannel) ID() *uint16
+```
+
+Returns the ID for this DataChannel. The value is initially null if the ID was not provided at channel creation time and the DTLS role of the SCTP transport has not yet been negotiated. After the ID is set to a non-null value, it will not change.
+
+### ReadyState
+
+```go
+func (d *DataChannel) ReadyState() DataChannelState
+```
+
+Returns the current state of the DataChannel object.
+
+<ResponseField name="return" type="DataChannelState">
+  One of: `DataChannelStateConnecting`, `DataChannelStateOpen`, `DataChannelStateClosing`, or `DataChannelStateClosed`.
+</ResponseField>
+
+### Protocol
+
+```go
+func (d *DataChannel) Protocol() string
+```
+
+Returns the name of the sub-protocol used with this DataChannel.
+
+### Ordered
+
+```go
+func (d *DataChannel) Ordered() bool
+```
+
+Returns `true` if the DataChannel is ordered, and `false` if out-of-order delivery is allowed.
+
+### MaxPacketLifeTime
+
+```go
+func (d *DataChannel) MaxPacketLifeTime() *uint16
+```
+
+Returns the length of the time window (in milliseconds) during which transmissions and retransmissions may occur in unreliable mode.
+
+### MaxRetransmits
+
+```go
+func (d *DataChannel) MaxRetransmits() *uint16
+```
+
+Returns the maximum number of retransmissions attempted in unreliable mode.
+
+### Negotiated
+
+```go
+func (d *DataChannel) Negotiated() bool
+```
+
+Returns whether this DataChannel was negotiated by the application (`true`), or not (`false`).
+
+### Transport
+
+```go
+func (d *DataChannel) Transport() *SCTPTransport
+```
+
+Returns the SCTPTransport instance the DataChannel is sending over.
+
+## Sending Data
+
+### Send
+
+```go
+func (d *DataChannel) Send(data []byte) error
+```
+
+Sends binary data to the DataChannel peer.
+
+<ParamField path="data" type="[]byte" required>
+  The binary data to send.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the channel is not open or if the write fails.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+data := []byte("Hello, peer!")
+err := dc.Send(data)
+if err != nil {
+    log.Printf("Send error: %v", err)
+}
+```
+
+</CodeGroup>
+
+### SendText
+
+```go
+func (d *DataChannel) SendText(s string) error
+```
+
+Sends a text message to the DataChannel peer.
+
+<ParamField path="s" type="string" required>
+  The text message to send.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the channel is not open or if the write fails.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+err := dc.SendText("Hello, world!")
+if err != nil {
+    log.Printf("SendText error: %v", err)
+}
+```
+
+</CodeGroup>
+
+## Event Handlers
+
+### OnOpen
+
+```go
+func (d *DataChannel) OnOpen(f func())
+```
+
+Sets an event handler invoked when the underlying data transport has been established (or re-established).
+
+<ParamField path="f" type="func()" required>
+  The callback function to invoke when the channel opens.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+dc.OnOpen(func() {
+    log.Println("Data channel opened")
+    dc.SendText("Channel is ready!")
+})
+```
+
+</CodeGroup>
+
+<Info>
+If the data channel is already open when `OnOpen` is called, the handler will be invoked immediately.
+</Info>
+
+### OnDial
+
+```go
+func (d *DataChannel) OnDial(f func())
+```
+
+Sets an event handler invoked when the peer has been dialed, but before the peer has responded.
+
+<ParamField path="f" type="func()" required>
+  The callback function to invoke when dialing begins.
+</ParamField>
+
+### OnMessage
+
+```go
+func (d *DataChannel) OnMessage(f func(msg DataChannelMessage))
+```
+
+Sets an event handler invoked on a message arrival over the SCTP transport from a remote peer.
+
+<ParamField path="f" type="func(msg DataChannelMessage)" required>
+  The callback function to invoke when a message is received.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    if msg.IsString {
+        log.Printf("Received text: %s", string(msg.Data))
+    } else {
+        log.Printf("Received binary: %d bytes", len(msg.Data))
+    }
+})
+```
+
+</CodeGroup>
+
+<Warning>
+OnMessage can currently receive messages up to 16384 bytes in size. Check out the Detach API if you need larger message sizes. Note that browser support for larger messages is also limited.
+</Warning>
+
+### OnClose
+
+```go
+func (d *DataChannel) OnClose(f func())
+```
+
+Sets an event handler invoked when the underlying data transport has been closed.
+
+<ParamField path="f" type="func()" required>
+  The callback function to invoke when the channel closes.
+</ParamField>
+
+<Note>
+Due to backwards compatibility, there is a chance that OnClose can be called even if GracefulClose is used. If this is problematic, deregister OnClose prior to calling GracefulClose.
+</Note>
+
+### OnError
+
+```go
+func (d *DataChannel) OnError(f func(err error))
+```
+
+Sets an event handler invoked when the underlying data transport cannot be read.
+
+<ParamField path="f" type="func(err error)" required>
+  The callback function to invoke when an error occurs.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+dc.OnError(func(err error) {
+    log.Printf("Data channel error: %v", err)
+})
+```
+
+</CodeGroup>
+
+## Buffered Amount
+
+### BufferedAmount
+
+```go
+func (d *DataChannel) BufferedAmount() uint64
+```
+
+Returns the number of bytes of application data (UTF-8 text and binary data) that have been queued using `Send()` or `SendText()`.
+
+The value does not include framing overhead incurred by the protocol or buffering done by the operating system or network hardware. The buffered amount only increases with each call to the send methods as long as the ReadyState is open. The value does not reset to zero once the channel closes.
+
+### BufferedAmountLowThreshold
+
+```go
+func (d *DataChannel) BufferedAmountLowThreshold() uint64
+```
+
+Returns the threshold at which the bufferedAmount is considered to be low. When the bufferedAmount decreases from above this threshold to equal or below it, the `OnBufferedAmountLow` event fires.
+
+The threshold is initially zero on each new DataChannel, but the application may change its value at any time.
+
+### SetBufferedAmountLowThreshold
+
+```go
+func (d *DataChannel) SetBufferedAmountLowThreshold(th uint64)
+```
+
+Updates the buffered amount low threshold.
+
+<ParamField path="th" type="uint64" required>
+  The new threshold value in bytes.
+</ParamField>
+
+### OnBufferedAmountLow
+
+```go
+func (d *DataChannel) OnBufferedAmountLow(f func())
+```
+
+Sets an event handler invoked when the number of bytes of outgoing data becomes lower than or equal to the BufferedAmountLowThreshold.
+
+<ParamField path="f" type="func()" required>
+  The callback function to invoke when the buffered amount becomes low.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+dc.SetBufferedAmountLowThreshold(1024)
+dc.OnBufferedAmountLow(func() {
+    log.Println("Buffer is low, safe to send more data")
+})
+```
+
+</CodeGroup>
+
+## Advanced Operations
+
+### Detach
+
+```go
+func (d *DataChannel) Detach() (datachannel.ReadWriteCloser, error)
+```
+
+Detaches the underlying datachannel, providing an idiomatic `io.ReadWriteCloser` API with `.Read()` and `.Write()` methods instead of `.Send()` and `.OnMessage()`.
+
+<Warning>
+Before calling Detach, you must enable this behavior by calling `webrtc.DetachDataChannels()`. Combining detached and normal data channels is not supported. This also disables the OnMessage callback.
+</Warning>
+
+<ResponseField name="return" type="datachannel.ReadWriteCloser">
+  A ReadWriteCloser interface for reading and writing data.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if detach is not enabled or if called before the channel is opened.
+</ResponseField>
+
+### DetachWithDeadline
+
+```go
+func (d *DataChannel) DetachWithDeadline() (datachannel.ReadWriteCloserDeadliner, error)
+```
+
+Detaches the underlying datachannel with deadline support. This is the same as `Detach()` but returns a `ReadWriteCloserDeadliner`.
+
+<ResponseField name="return" type="datachannel.ReadWriteCloserDeadliner">
+  A ReadWriteCloserDeadliner interface with deadline support.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns an error if detach is not enabled or if called before the channel is opened.
+</ResponseField>
+
+<CodeGroup>
+
+```go Detach Example
+// Enable detach mode (must be done before creating peer connection)
+se := webrtc.SettingEngine{}
+se.DetachDataChannels()
+
+// Later, in OnOpen handler
+dc.OnOpen(func() {
+    raw, err := dc.Detach()
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Use standard Read/Write
+    go func() {
+        buf := make([]byte, 1024)
+        for {
+            n, err := raw.Read(buf)
+            if err != nil {
+                return
+            }
+            log.Printf("Read %d bytes", n)
+        }
+    }()
+})
+```
+
+</CodeGroup>
+
+## Closing the Channel
+
+### Close
+
+```go
+func (d *DataChannel) Close() error
+```
+
+Closes the DataChannel. It may be called regardless of whether the DataChannel object was created by this peer or the remote peer.
+
+<ResponseField name="error" type="error">
+  Returns an error if the close operation fails.
+</ResponseField>
+
+### GracefulClose
+
+```go
+func (d *DataChannel) GracefulClose() error
+```
+
+Closes the DataChannel gracefully and waits for any goroutines it started to complete.
+
+<ResponseField name="error" type="error">
+  Returns an error if the close operation fails.
+</ResponseField>
+
+<Warning>
+This is only safe to call outside of DataChannel callbacks or if in a callback, in its own goroutine. Normally, close only stops writes, and graceful close will wait for reads to be finished based on underlying SCTP association closure or a SCTP reset stream from the other side.
+</Warning>
+
+<CodeGroup>
+
+```go Example
+// In a callback, use a goroutine
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    if string(msg.Data) == "close" {
+        go dc.GracefulClose()
+    }
+})
+
+// Outside callbacks, can call directly
+err := dc.GracefulClose()
+if err != nil {
+    log.Printf("Error closing: %v", err)
+}
+```
+
+</CodeGroup>
+
+## Complete Example
+
+<CodeGroup>
+
+```go Full Usage
+package main
+
+import (
+    "log"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create peer connection
+    config := webrtc.Configuration{}
+    pc, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer pc.Close()
+
+    // Create data channel
+    dc, err := pc.CreateDataChannel("my-channel", nil)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Set up event handlers
+    dc.OnOpen(func() {
+        log.Println("Data channel opened")
+        err := dc.SendText("Hello from Pion!")
+        if err != nil {
+            log.Printf("Send error: %v", err)
+        }
+    })
+
+    dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+        if msg.IsString {
+            log.Printf("Received: %s", string(msg.Data))
+        } else {
+            log.Printf("Received binary: %d bytes", len(msg.Data))
+        }
+    })
+
+    dc.OnClose(func() {
+        log.Println("Data channel closed")
+    })
+
+    dc.OnError(func(err error) {
+        log.Printf("Error: %v", err)
+    })
+
+    // Continue with signaling...
+}
+```
+
+</CodeGroup>
+
+## Related Types
+
+<CardGroup cols={2}>
+  <Card title="SCTPTransport" icon="network-wired" href="/api/sctp-transport">
+    The underlying SCTP transport for data channels
+  </Card>
+  <Card title="DataChannelMessage" icon="message">
+    Message structure containing data and type information
+  </Card>
+  <Card title="DataChannelParameters" icon="sliders">
+    Configuration parameters for creating data channels
+  </Card>
+  <Card title="DataChannelState" icon="circle-dot">
+    State enumeration for data channel lifecycle
+  </Card>
+</CardGroup>

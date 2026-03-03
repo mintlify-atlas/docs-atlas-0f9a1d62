@@ -1,0 +1,360 @@
+---
+title: API
+description: Configure PeerConnection with custom SettingEngine, MediaEngine, and Interceptors
+---
+
+## Overview
+
+The `API` type allows configuration of a PeerConnection with APIs that are available in the standard. This lets you set custom behavior via the SettingEngine, configure codecs via the MediaEngine, and define custom media behaviors via Interceptors.
+
+<Info>
+  Source: `api.go:14-25`
+</Info>
+
+## Type Definition
+
+```go
+type API struct {
+    settingEngine       *SettingEngine
+    mediaEngine         *MediaEngine
+    interceptorRegistry *interceptor.Registry
+    interceptor         interceptor.Interceptor // Generated per PeerConnection
+}
+```
+
+<ParamField path="settingEngine" type="*SettingEngine">
+  Controls low-level WebRTC behavior and platform settings
+</ParamField>
+
+<ParamField path="mediaEngine" type="*MediaEngine">
+  Manages codec registration and media capabilities
+</ParamField>
+
+<ParamField path="interceptorRegistry" type="*interceptor.Registry">
+  Registry of interceptors for media processing pipeline
+</ParamField>
+
+<ParamField path="interceptor" type="interceptor.Interceptor">
+  Generated interceptor instance (one per PeerConnection)
+</ParamField>
+
+## Constructor
+
+### NewAPI
+
+Creates a new API object for keeping semi-global settings to WebRTC objects.
+
+<Info>
+  Source: `api.go:27-65`
+</Info>
+
+```go
+func NewAPI(options ...func(*API)) *API
+```
+
+<ParamField path="options" type="...func(*API)" optional>
+  Optional configuration functions to customize the API
+</ParamField>
+
+<ResponseField name="return" type="*API">
+  A new API instance with default or customized settings
+</ResponseField>
+
+#### Behavior
+
+- Uses default codecs unless customized with `WithMediaEngine`
+- Uses default interceptors unless customized with `WithInterceptorRegistry`
+- Sets up a default logger factory if not provided
+- Automatically registers default codecs and interceptors
+
+<CodeGroup>
+```go Default API
+api := webrtc.NewAPI()
+```
+
+```go With Custom MediaEngine
+m := &webrtc.MediaEngine{}
+if err := m.RegisterDefaultCodecs(); err != nil {
+    panic(err)
+}
+
+api := webrtc.NewAPI(
+    webrtc.WithMediaEngine(m),
+)
+```
+
+```go Fully Customized
+m := &webrtc.MediaEngine{}
+s := webrtc.SettingEngine{}
+ir := &interceptor.Registry{}
+
+api := webrtc.NewAPI(
+    webrtc.WithMediaEngine(m),
+    webrtc.WithSettingEngine(s),
+    webrtc.WithInterceptorRegistry(ir),
+)
+```
+</CodeGroup>
+
+## Configuration Options
+
+### WithMediaEngine
+
+Allows providing a MediaEngine to the API. Settings can be changed after passing the engine to an API. When a PeerConnection is created, the MediaEngine is copied and no more changes can be made.
+
+<Info>
+  Source: `api.go:67-78`
+</Info>
+
+```go
+func WithMediaEngine(m *MediaEngine) func(a *API)
+```
+
+<ParamField path="m" type="*MediaEngine">
+  The MediaEngine to use for codec configuration
+</ParamField>
+
+<ResponseField name="return" type="func(a *API)">
+  Configuration function for use with NewAPI
+</ResponseField>
+
+#### Example
+
+```go
+m := &webrtc.MediaEngine{}
+
+// Register only VP8 video codec
+vp8Codec := webrtc.RTPCodecCapability{
+    MimeType:     webrtc.MimeTypeVP8,
+    ClockRate:    90000,
+    Channels:     0,
+    SDPFmtpLine:  "",
+}
+if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+    RTPCodecCapability: vp8Codec,
+    PayloadType:        96,
+}, webrtc.RTPCodecTypeVideo); err != nil {
+    panic(err)
+}
+
+api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+```
+
+### WithSettingEngine
+
+Allows providing a SettingEngine to the API. Settings should not be changed after passing the engine to an API.
+
+<Info>
+  Source: `api.go:80-86`
+</Info>
+
+```go
+func WithSettingEngine(s SettingEngine) func(a *API)
+```
+
+<ParamField path="s" type="SettingEngine">
+  The SettingEngine with custom configuration
+</ParamField>
+
+<ResponseField name="return" type="func(a *API)">
+  Configuration function for use with NewAPI
+</ResponseField>
+
+<Warning>
+  Settings should not be modified after passing the SettingEngine to an API.
+</Warning>
+
+#### Example
+
+```go
+s := webrtc.SettingEngine{}
+
+// Set custom network interfaces
+s.SetInterfaceFilter(func(iface string) bool {
+    return iface == "eth0"
+})
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+```
+
+### WithInterceptorRegistry
+
+Allows providing Interceptors to the API. Settings should not be changed after passing the registry to an API.
+
+<Info>
+  Source: `api.go:88-97`
+</Info>
+
+```go
+func WithInterceptorRegistry(ir *interceptor.Registry) func(a *API)
+```
+
+<ParamField path="ir" type="*interceptor.Registry">
+  The interceptor registry with custom interceptors
+</ParamField>
+
+<ResponseField name="return" type="func(a *API)">
+  Configuration function for use with NewAPI
+</ResponseField>
+
+<Warning>
+  Settings should not be changed after passing the registry to an API.
+</Warning>
+
+#### Example
+
+```go
+ir := &interceptor.Registry{}
+
+// Register custom interceptor
+ir.Add(myCustomInterceptor)
+
+api := webrtc.NewAPI(webrtc.WithInterceptorRegistry(ir))
+```
+
+## Methods
+
+### NewPeerConnection
+
+Creates a new PeerConnection with the provided configuration against the API object.
+
+<Info>
+  Source: `peerconnection.go:111-212`
+</Info>
+
+```go
+func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection, error)
+```
+
+<ParamField path="configuration" type="Configuration">
+  Configuration for the new PeerConnection
+</ParamField>
+
+<ResponseField name="pc" type="*PeerConnection">
+  The newly created PeerConnection
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if creation fails, nil otherwise
+</ResponseField>
+
+<Note>
+  This method will attach the MediaEngine and interceptors configured in the API to the resulting PeerConnection.
+</Note>
+
+#### Example
+
+```go
+api := webrtc.NewAPI()
+
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+    },
+}
+
+pc, err := api.NewPeerConnection(config)
+if err != nil {
+    panic(err)
+}
+defer pc.Close()
+```
+
+## Usage Patterns
+
+<AccordionGroup>
+  <Accordion title="Custom Codec Configuration">
+    Configure only specific codecs for your application:
+
+    ```go
+    m := &webrtc.MediaEngine{}
+
+    // Register H264 with specific profile
+    h264Codec := webrtc.RTPCodecCapability{
+        MimeType:    webrtc.MimeTypeH264,
+        ClockRate:   90000,
+        Channels:    0,
+        SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+    }
+    
+    if err := m.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: h264Codec,
+        PayloadType:        102,
+    }, webrtc.RTPCodecTypeVideo); err != nil {
+        panic(err)
+    }
+
+    api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+    ```
+  </Accordion>
+
+  <Accordion title="Network Interface Control">
+    Control which network interfaces are used:
+
+    ```go
+    s := webrtc.SettingEngine{}
+
+    // Only use specific interface
+    s.SetInterfaceFilter(func(iface string) bool {
+        return iface == "eth0" || iface == "wlan0"
+    })
+
+    // Set NAT 1:1 mapping
+    s.SetNAT1To1IPs([]string{"1.2.3.4"}, webrtc.ICECandidateTypeHost)
+
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    ```
+  </Accordion>
+
+  <Accordion title="Custom Interceptors">
+    Add custom media processing:
+
+    ```go
+    m := &webrtc.MediaEngine{}
+    if err := m.RegisterDefaultCodecs(); err != nil {
+        panic(err)
+    }
+
+    ir := &interceptor.Registry{}
+
+    // Register NACK for video
+    if err := webrtc.RegisterDefaultInterceptors(m, ir); err != nil {
+        panic(err)
+    }
+
+    api := webrtc.NewAPI(
+        webrtc.WithMediaEngine(m),
+        webrtc.WithInterceptorRegistry(ir),
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Reuse API Instances" icon="recycle">
+    Create one API instance and reuse it for multiple PeerConnections to share codec and interceptor configuration.
+  </Card>
+
+  <Card title="Immutable Settings" icon="lock">
+    Don't modify SettingEngine or InterceptorRegistry after passing them to the API.
+  </Card>
+
+  <Card title="MediaEngine Copying" icon="copy">
+    MediaEngine is copied per PeerConnection, so changes after creation won't affect existing connections.
+  </Card>
+
+  <Card title="Logger Factory" icon="file-text">
+    Provide a custom LoggerFactory through SettingEngine for application-specific logging.
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [PeerConnection](/api/peer-connection) - Main connection interface
+- [Configuration](/api/configuration) - Connection configuration options
+- [SettingEngine](https://pkg.go.dev/github.com/pion/webrtc/v4#SettingEngine) - Low-level settings
+- [MediaEngine](https://pkg.go.dev/github.com/pion/webrtc/v4#MediaEngine) - Codec configuration

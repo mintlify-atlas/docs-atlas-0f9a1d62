@@ -1,0 +1,449 @@
+---
+title: "RTP Forwarder"
+description: "Forward WebRTC audio and video streams via RTP to external applications"
+---
+
+The rtp-forwarder example demonstrates how to receive media from a web browser via WebRTC and forward it to external applications using raw RTP. This enables integration with media processing tools, streaming servers, or any application that can consume RTP streams.
+
+## Overview
+
+This example acts as a WebRTC-to-RTP bridge, receiving VP8 video and Opus audio from a browser and forwarding them via UDP to local ports where external applications (like FFmpeg, VLC, or GStreamer) can consume them.
+
+## Key Features
+
+- WebRTC to RTP bridge functionality
+- Separate audio and video UDP forwarding
+- Payload type normalization for compatibility
+- Custom MediaEngine and Interceptor configuration
+- Integration with external media processing tools
+
+## Architecture
+
+```
+Browser (WebRTC) → Pion Server → RTP (UDP) → External App
+                                    ↓
+                            Port 4000 (Audio)
+                            Port 4002 (Video)
+```
+
+## How It Works
+
+<Steps>
+  <Step title="Configure Media Engine">
+    Register specific codecs for RTP forwarding:
+    ```go
+    mediaEngine := &webrtc.MediaEngine{}
+
+    // Register VP8 for video
+    if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:  webrtc.MimeTypeVP8,
+            ClockRate: 90000,
+            Channels:  0,
+        },
+    }, webrtc.RTPCodecTypeVideo); err != nil {
+        panic(err)
+    }
+
+    // Register Opus for audio
+    if err := mediaEngine.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType:  webrtc.MimeTypeOpus,
+            ClockRate: 48000,
+            Channels:  0,
+        },
+    }, webrtc.RTPCodecTypeAudio); err != nil {
+        panic(err)
+    }
+    ```
+  </Step>
+  
+  <Step title="Setup UDP Connections">
+    Create UDP connections for audio and video forwarding:
+    ```go
+    type udpConn struct {
+        conn        *net.UDPConn
+        port        int
+        payloadType uint8
+    }
+
+    udpConns := map[string]*udpConn{
+        "audio": {port: 4000, payloadType: 111},
+        "video": {port: 4002, payloadType: 96},
+    }
+
+    for _, conn := range udpConns {
+        // Create remote addr
+        raddr, err := net.ResolveUDPAddr(
+            "udp",
+            fmt.Sprintf("127.0.0.1:%d", conn.port),
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        // Dial UDP
+        conn.conn, err = net.DialUDP("udp", laddr, raddr)
+        if err != nil {
+            panic(err)
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle Incoming Tracks">
+    Forward RTP packets from WebRTC tracks to UDP:
+    ```go
+    peerConnection.OnTrack(func(
+        track *webrtc.TrackRemote,
+        receiver *webrtc.RTPReceiver,
+    ) {
+        // Get the UDP connection for this track type
+        conn, ok := udpConns[track.Kind().String()]
+        if !ok {
+            return
+        }
+
+        buf := make([]byte, 1500)
+        rtpPacket := &rtp.Packet{}
+        
+        for {
+            // Read RTP packet from WebRTC track
+            n, _, readErr := track.Read(buf)
+            if readErr != nil {
+                panic(readErr)
+            }
+
+            // Unmarshal and update PayloadType
+            if err = rtpPacket.Unmarshal(buf[:n]); err != nil {
+                panic(err)
+            }
+            rtpPacket.PayloadType = conn.payloadType
+
+            // Marshal back with updated PayloadType
+            if n, err = rtpPacket.MarshalTo(buf); err != nil {
+                panic(err)
+            }
+
+            // Forward to UDP
+            if _, writeErr := conn.conn.Write(buf[:n]); writeErr != nil {
+                // Handle connection refused (receiver not ready yet)
+                var opError *net.OpError
+                if errors.As(writeErr, &opError) &&
+                   opError.Err.Error() == "write: connection refused" {
+                    continue
+                }
+                panic(err)
+            }
+        }
+    })
+    ```
+  </Step>
+  
+  <Step title="Add Transceivers">
+    Explicitly request audio and video tracks:
+    ```go
+    // Allow receiving 1 audio track and 1 video track
+    if _, err = peerConnection.AddTransceiverFromKind(
+        webrtc.RTPCodecTypeAudio,
+    ); err != nil {
+        panic(err)
+    }
+    
+    if _, err = peerConnection.AddTransceiverFromKind(
+        webrtc.RTPCodecTypeVideo,
+    ); err != nil {
+        panic(err)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Source Code
+
+<CodeGroup>
+```go UDP Connection Setup
+type udpConn struct {
+    conn        *net.UDPConn
+    port        int
+    payloadType uint8
+}
+
+func setupUDPConnections() map[string]*udpConn {
+    // Create local addr
+    laddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:")
+    if err != nil {
+        panic(err)
+    }
+
+    udpConns := map[string]*udpConn{
+        "audio": {port: 4000, payloadType: 111},
+        "video": {port: 4002, payloadType: 96},
+    }
+
+    for _, conn := range udpConns {
+        // Create remote addr
+        raddr, err := net.ResolveUDPAddr(
+            "udp",
+            fmt.Sprintf("127.0.0.1:%d", conn.port),
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        // Dial udp
+        conn.conn, err = net.DialUDP("udp", laddr, raddr)
+        if err != nil {
+            panic(err)
+        }
+    }
+
+    return udpConns
+}
+```
+
+```go Packet Forwarding
+peerConnection.OnTrack(func(
+    track *webrtc.TrackRemote,
+    receiver *webrtc.RTPReceiver,
+) {
+    // Retrieve UDP connection based on track kind
+    conn, ok := udpConns[track.Kind().String()]
+    if !ok {
+        return
+    }
+
+    buf := make([]byte, 1500)
+    rtpPacket := &rtp.Packet{}
+    
+    for {
+        // Read RTP packet
+        n, _, readErr := track.Read(buf)
+        if readErr != nil {
+            panic(readErr)
+        }
+
+        // Unmarshal the packet and update PayloadType
+        if err = rtpPacket.Unmarshal(buf[:n]); err != nil {
+            panic(err)
+        }
+        rtpPacket.PayloadType = conn.payloadType
+
+        // Marshal back into buffer
+        if n, err = rtpPacket.MarshalTo(buf); err != nil {
+            panic(err)
+        }
+
+        // Write to UDP
+        if _, writeErr := conn.conn.Write(buf[:n]); writeErr != nil {
+            // Handle "connection refused" gracefully
+            // This happens when receiver isn't listening yet
+            var opError *net.OpError
+            if errors.As(writeErr, &opError) &&
+               opError.Err.Error() == "write: connection refused" {
+                continue
+            }
+            panic(err)
+        }
+    }
+})
+```
+
+```go Connection State Handling
+peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    fmt.Printf("Peer Connection State has changed: %s\n", state.String())
+
+    if state == webrtc.PeerConnectionStateFailed {
+        fmt.Println("Done forwarding")
+        os.Exit(0)
+    }
+
+    if state == webrtc.PeerConnectionStateClosed {
+        fmt.Println("Done forwarding")
+        os.Exit(0)
+    }
+})
+
+peerConnection.OnICEConnectionStateChange(func(
+    connectionState webrtc.ICEConnectionState,
+) {
+    fmt.Printf("Connection State has changed %s \n", connectionState.String())
+
+    if connectionState == webrtc.ICEConnectionStateConnected {
+        fmt.Println("Ctrl+C the remote client to stop the demo")
+    }
+})
+```
+</CodeGroup>
+
+## Important Implementation Details
+
+<AccordionGroup>
+  <Accordion title="Payload Type Normalization">
+    The browser may use different payload types than your external application expects:
+    
+    ```go
+    rtpPacket.PayloadType = conn.payloadType
+    ```
+    
+    This example normalizes payload types to:
+    - **96** for VP8 video
+    - **111** for Opus audio
+    
+    These match common RTP configurations. Adjust based on your receiver's expectations.
+  </Accordion>
+  
+  <Accordion title="Handling Connection Refused">
+    The example gracefully handles cases where the receiver isn't ready:
+    
+    ```go
+    var opError *net.OpError
+    if errors.As(writeErr, &opError) &&
+       opError.Err.Error() == "write: connection refused" {
+        continue
+    }
+    ```
+    
+    **Why this matters:**
+    Users typically complete the WebRTC handshake before starting the receiver application. Without this handling, the forwarder would crash.
+    
+    **Best practice:**
+    1. Start the Pion forwarder
+    2. Complete WebRTC handshake
+    3. Start your receiver application
+  </Accordion>
+  
+  <Accordion title="Direct Packet Reading">
+    The example uses `track.Read()` instead of `track.ReadRTP()`:
+    
+    ```go
+    n, _, readErr := track.Read(buf)
+    ```
+    
+    This reads raw RTP packets as byte arrays, allowing manipulation before forwarding. For forwarding without modification, you could use:
+    
+    ```go
+    packet, _, err := track.ReadRTP()
+    // Forward packet directly
+    ```
+  </Accordion>
+  
+  <Accordion title="Port Selection">
+    The example uses specific ports:
+    - **4000**: Audio (Opus)
+    - **4002**: Video (VP8)
+    
+    These ports are arbitrary. Configure your receiver to listen on the same ports, or modify the example to use different ports.
+  </Accordion>
+</AccordionGroup>
+
+## Running with FFmpeg
+
+Here's how to use this example with FFmpeg to receive and process the streams:
+
+<Steps>
+  <Step title="Create SDP file">
+    Create `rtp-forwarder.sdp` with the following content:
+    ```sdp
+    v=0
+    o=- 0 0 IN IP4 127.0.0.1
+    s=Pion WebRTC
+    c=IN IP4 127.0.0.1
+    t=0 0
+    m=audio 4000 RTP/AVP 111
+    a=rtpmap:111 opus/48000/2
+    m=video 4002 RTP/AVP 96
+    a=rtpmap:96 VP8/90000
+    ```
+  </Step>
+  
+  <Step title="Start the forwarder">
+    ```bash
+    cd examples/rtp-forwarder
+    go run main.go
+    ```
+  </Step>
+  
+  <Step title="Complete WebRTC handshake">
+    1. Open the example in your browser
+    2. Enable webcam/microphone
+    3. Copy the offer and paste into terminal
+    4. Copy the answer and paste into browser
+  </Step>
+  
+  <Step title="Start FFmpeg receiver">
+    ```bash
+    ffmpeg -protocol_whitelist file,udp,rtp -i rtp-forwarder.sdp -c:v copy -c:a copy output.webm
+    ```
+  </Step>
+</Steps>
+
+## Use Cases with External Tools
+
+<CardGroup cols={2}>
+  <Card title="FFmpeg Processing" icon="film">
+    Transcode, record, or stream to RTMP servers
+    ```bash
+    ffmpeg -i rtp-forwarder.sdp \
+      -c:v libx264 -c:a aac \
+      -f flv rtmp://server/live/stream
+    ```
+  </Card>
+  
+  <Card title="VLC Playback" icon="play">
+    Watch the stream in VLC Media Player
+    ```bash
+    vlc rtp-forwarder.sdp
+    ```
+  </Card>
+  
+  <Card title="GStreamer Pipeline" icon="diagram-project">
+    Build custom processing pipelines
+    ```bash
+    gst-launch-1.0 udpsrc port=4002 ! \
+      application/x-rtp ! rtpvp8depay ! \
+      vp8dec ! autovideosink
+    ```
+  </Card>
+  
+  <Card title="Custom Processing" icon="code">
+    Consume RTP in your own application for:
+    - AI/ML video analysis
+    - Computer vision processing
+    - Custom encoding/decoding
+    - Quality monitoring
+  </Card>
+</CardGroup>
+
+## Running the Example
+
+<Steps>
+  <Step title="Start the application">
+    ```bash
+    cd examples/rtp-forwarder
+    go run main.go
+    ```
+  </Step>
+  
+  <Step title="Complete WebRTC handshake">
+    Follow the copy-paste signaling process with your browser
+  </Step>
+  
+  <Step title="Start your RTP receiver">
+    Launch FFmpeg, VLC, or your custom application to receive the RTP streams on ports 4000 (audio) and 4002 (video)
+  </Step>
+  
+  <Step title="Verify streaming">
+    Check that your receiver is processing the audio and video streams correctly
+  </Step>
+</Steps>
+
+<Tip>
+  For production use, consider implementing proper session management, dynamic port allocation, and SDP negotiation to handle multiple simultaneous connections.
+</Tip>
+
+## Related Examples
+
+- [Save to Disk](/examples/save-to-disk) - Save media directly to files
+- [Broadcast](/examples/broadcast) - Forward to multiple WebRTC viewers
+- [Play from Disk](/examples/media-streaming) - Stream pre-recorded content

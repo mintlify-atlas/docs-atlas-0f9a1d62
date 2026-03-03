@@ -1,0 +1,1006 @@
+---
+title: PeerConnection
+description: Establish peer-to-peer communications with media and data channels
+---
+
+## Overview
+
+The `PeerConnection` represents a WebRTC connection that establishes peer-to-peer communications with another PeerConnection instance in a browser, or to another endpoint implementing the required protocols.
+
+<Info>
+  Source: `peerconnection.go:33-98`
+</Info>
+
+## Type Definition
+
+```go
+type PeerConnection struct {
+    configuration Configuration
+    
+    currentLocalDescription  *SessionDescription
+    pendingLocalDescription  *SessionDescription
+    currentRemoteDescription *SessionDescription
+    pendingRemoteDescription *SessionDescription
+    
+    signalingState      SignalingState
+    iceConnectionState  ICEConnectionState
+    connectionState     PeerConnectionState
+    
+    rtpTransceivers []*RTPTransceiver
+    iceGatherer     *ICEGatherer
+    iceTransport    *ICETransport
+    dtlsTransport   *DTLSTransport
+    sctpTransport   *SCTPTransport
+    // ... internal fields
+}
+```
+
+## Constructors
+
+### NewPeerConnection
+
+Creates a PeerConnection with the default codecs and interceptors.
+
+<Info>
+  Source: `peerconnection.go:100-109`
+</Info>
+
+```go
+func NewPeerConnection(configuration Configuration) (*PeerConnection, error)
+```
+
+<ParamField path="configuration" type="Configuration">
+  Configuration for the new PeerConnection
+</ParamField>
+
+<ResponseField name="pc" type="*PeerConnection">
+  The newly created PeerConnection
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if creation fails, nil otherwise
+</ResponseField>
+
+<Note>
+  If you wish to customize the set of available codecs and/or the set of active interceptors, create an API with a custom MediaEngine and/or interceptor.Registry, then call `api.NewPeerConnection()` instead.
+</Note>
+
+```go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {URLs: []string{"stun:stun.l.google.com:19302"}},
+    },
+}
+
+pc, err := webrtc.NewPeerConnection(config)
+if err != nil {
+    panic(err)
+}
+defer pc.Close()
+```
+
+## Offer/Answer Methods
+
+### CreateOffer
+
+Starts the PeerConnection and generates the local description.
+
+<Info>
+  Source: `peerconnection.go:665-797`
+</Info>
+
+```go
+func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription, error)
+```
+
+<ParamField path="options" type="*OfferOptions" optional>
+  Optional offer options (e.g., ICERestart)
+</ParamField>
+
+<ResponseField name="offer" type="SessionDescription">
+  The generated SDP offer
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if offer creation fails
+</ResponseField>
+
+```go
+offer, err := pc.CreateOffer(nil)
+if err != nil {
+    return err
+}
+
+err = pc.SetLocalDescription(offer)
+if err != nil {
+    return err
+}
+
+// Send offer.SDP to remote peer via signaling
+```
+
+### CreateAnswer
+
+Starts the PeerConnection and generates the local description in response to an offer.
+
+<Info>
+  Source: `peerconnection.go:893-965`
+</Info>
+
+```go
+func (pc *PeerConnection) CreateAnswer(options *AnswerOptions) (SessionDescription, error)
+```
+
+<ParamField path="options" type="*AnswerOptions" optional>
+  Optional answer options
+</ParamField>
+
+<ResponseField name="answer" type="SessionDescription">
+  The generated SDP answer
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if answer creation fails, or if no remote description is set
+</ResponseField>
+
+```go
+answer, err := pc.CreateAnswer(nil)
+if err != nil {
+    return err
+}
+
+err = pc.SetLocalDescription(answer)
+if err != nil {
+    return err
+}
+
+// Send answer.SDP to remote peer via signaling
+```
+
+### SetLocalDescription
+
+Sets the SessionDescription of the local peer.
+
+<Info>
+  Source: `peerconnection.go:1087-1146`
+</Info>
+
+```go
+func (pc *PeerConnection) SetLocalDescription(desc SessionDescription) error
+```
+
+<ParamField path="desc" type="SessionDescription">
+  The local session description to set
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the description is invalid or connection is closed
+</ResponseField>
+
+<Note>
+  According to JSEP 5.4, if `desc.SDP` is empty, the last created offer or answer will be used based on `desc.Type`.
+</Note>
+
+### SetRemoteDescription
+
+Sets the SessionDescription of the remote peer.
+
+<Info>
+  Source: `peerconnection.go:1160-1369`
+</Info>
+
+```go
+func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error
+```
+
+<ParamField path="desc" type="SessionDescription">
+  The remote session description to set
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the description is invalid or connection is closed
+</ResponseField>
+
+```go
+// Receive SDP from remote peer
+remoteDesc := webrtc.SessionDescription{
+    Type: webrtc.SDPTypeOffer,
+    SDP:  receivedSDP,
+}
+
+err := pc.SetRemoteDescription(remoteDesc)
+if err != nil {
+    return err
+}
+```
+
+## Session Description Accessors
+
+### LocalDescription
+
+Returns PendingLocalDescription if it is not null, otherwise returns CurrentLocalDescription.
+
+<Info>
+  Source: `peerconnection.go:1148-1158`
+</Info>
+
+```go
+func (pc *PeerConnection) LocalDescription() *SessionDescription
+```
+
+<ResponseField name="desc" type="*SessionDescription">
+  The current local description, or nil
+</ResponseField>
+
+### RemoteDescription
+
+Returns pendingRemoteDescription if it is not null, otherwise returns currentRemoteDescription.
+
+<Info>
+  Source: `peerconnection.go:2056-2069`
+</Info>
+
+```go
+func (pc *PeerConnection) RemoteDescription() *SessionDescription
+```
+
+<ResponseField name="desc" type="*SessionDescription">
+  The current remote description, or nil
+</ResponseField>
+
+### CurrentLocalDescription
+
+Represents the local description that was successfully negotiated the last time the PeerConnection transitioned into the stable state.
+
+<Info>
+  Source: `peerconnection.go:2606-2619`
+</Info>
+
+```go
+func (pc *PeerConnection) CurrentLocalDescription() *SessionDescription
+```
+
+### PendingLocalDescription
+
+Represents a local description that is in the process of being negotiated. Returns nil if the PeerConnection is in the stable state.
+
+<Info>
+  Source: `peerconnection.go:2621-2634`
+</Info>
+
+```go
+func (pc *PeerConnection) PendingLocalDescription() *SessionDescription
+```
+
+### CurrentRemoteDescription
+
+Represents the last remote description that was successfully negotiated.
+
+<Info>
+  Source: `peerconnection.go:2636-2645`
+</Info>
+
+```go
+func (pc *PeerConnection) CurrentRemoteDescription() *SessionDescription
+```
+
+### PendingRemoteDescription
+
+Represents a remote description that is in the process of being negotiated.
+
+<Info>
+  Source: `peerconnection.go:2647-2657`
+</Info>
+
+```go
+func (pc *PeerConnection) PendingRemoteDescription() *SessionDescription
+```
+
+## ICE Methods
+
+### AddICECandidate
+
+Accepts an ICE candidate string and adds it to the existing set of candidates.
+
+<Info>
+  Source: `peerconnection.go:2071-2116`
+</Info>
+
+```go
+func (pc *PeerConnection) AddICECandidate(candidate ICECandidateInit) error
+```
+
+<ParamField path="candidate" type="ICECandidateInit">
+  The ICE candidate to add
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if no remote description is set or candidate is invalid
+</ResponseField>
+
+```go
+err := pc.AddICECandidate(webrtc.ICECandidateInit{
+    Candidate: "candidate:...",
+})
+```
+
+### OnICECandidate
+
+Sets an event handler which is invoked when a new ICE candidate is found.
+
+<Info>
+  Source: `peerconnection.go:456-464`
+</Info>
+
+```go
+func (pc *PeerConnection) OnICECandidate(f func(*ICECandidate))
+```
+
+<ParamField path="f" type="func(*ICECandidate)">
+  Handler called with each new ICE candidate (nil when gathering is finished)
+</ParamField>
+
+<Note>
+  ICE candidate gathering only begins when SetLocalDescription or SetRemoteDescription is called. The handler will be called with a nil pointer when gathering is finished.
+</Note>
+
+```go
+pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+    if candidate != nil {
+        // Send candidate to remote peer
+        sendToRemote(candidate.ToJSON())
+    }
+})
+```
+
+### OnICEGatheringStateChange
+
+Sets an event handler which is invoked when the ICE candidate gathering state has changed.
+
+<Info>
+  Source: `peerconnection.go:466-480`
+</Info>
+
+```go
+func (pc *PeerConnection) OnICEGatheringStateChange(f func(ICEGatheringState))
+```
+
+<ParamField path="f" type="func(ICEGatheringState)">
+  Handler called when gathering state changes
+</ParamField>
+
+### OnICEConnectionStateChange
+
+Sets an event handler which is called when an ICE connection state is changed.
+
+<Info>
+  Source: `peerconnection.go:505-509`
+</Info>
+
+```go
+func (pc *PeerConnection) OnICEConnectionStateChange(f func(ICEConnectionState))
+```
+
+<ParamField path="f" type="func(ICEConnectionState)">
+  Handler called when ICE connection state changes
+</ParamField>
+
+```go
+pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+    fmt.Printf("ICE Connection State: %s\n", state.String())
+})
+```
+
+## Media Methods
+
+### AddTrack
+
+Adds a Track to the PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2181-2219`
+</Info>
+
+```go
+func (pc *PeerConnection) AddTrack(track TrackLocal) (*RTPSender, error)
+```
+
+<ParamField path="track" type="TrackLocal">
+  The local track to add
+</ParamField>
+
+<ResponseField name="sender" type="*RTPSender">
+  The RTPSender for the added track
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the connection is closed or track cannot be added
+</ResponseField>
+
+```go
+videoTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+if err != nil {
+    return err
+}
+
+sender, err := pc.AddTrack(videoTrack)
+if err != nil {
+    return err
+}
+```
+
+### RemoveTrack
+
+Removes a Track from the PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2221-2247`
+</Info>
+
+```go
+func (pc *PeerConnection) RemoveTrack(sender *RTPSender) error
+```
+
+<ParamField path="sender" type="*RTPSender">
+  The RTPSender to remove
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the connection is closed or sender not found
+</ResponseField>
+
+### OnTrack
+
+Sets an event handler which is called when remote track arrives from a remote peer.
+
+<Info>
+  Source: `peerconnection.go:482-488`
+</Info>
+
+```go
+func (pc *PeerConnection) OnTrack(f func(*TrackRemote, *RTPReceiver))
+```
+
+<ParamField path="f" type="func(*TrackRemote, *RTPReceiver)">
+  Handler called for each incoming remote track
+</ParamField>
+
+```go
+pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    fmt.Printf("Track has started, of type %d: %s\n", track.PayloadType(), track.Codec().MimeType)
+    
+    // Read RTP packets
+    for {
+        _, _, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+    }
+})
+```
+
+### AddTransceiverFromKind
+
+Creates a new RTPTransceiver and adds it to the set of transceivers.
+
+<Info>
+  Source: `peerconnection.go:2284-2329`
+</Info>
+
+```go
+func (pc *PeerConnection) AddTransceiverFromKind(
+    kind RTPCodecType,
+    init ...RTPTransceiverInit,
+) (*RTPTransceiver, error)
+```
+
+<ParamField path="kind" type="RTPCodecType">
+  The kind of media (Audio or Video)
+</ParamField>
+
+<ParamField path="init" type="...RTPTransceiverInit" optional>
+  Optional initialization parameters
+</ParamField>
+
+<ResponseField name="transceiver" type="*RTPTransceiver">
+  The created transceiver
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if creation fails
+</ResponseField>
+
+### AddTransceiverFromTrack
+
+Creates a new RTPTransceiver (SendRecv or SendOnly) and adds it to the set of transceivers.
+
+<Info>
+  Source: `peerconnection.go:2331-2355`
+</Info>
+
+```go
+func (pc *PeerConnection) AddTransceiverFromTrack(
+    track TrackLocal,
+    init ...RTPTransceiverInit,
+) (*RTPTransceiver, error)
+```
+
+<ParamField path="track" type="TrackLocal">
+  The local track for the transceiver
+</ParamField>
+
+<ParamField path="init" type="...RTPTransceiverInit" optional>
+  Optional initialization parameters
+</ParamField>
+
+<ResponseField name="transceiver" type="*RTPTransceiver">
+  The created transceiver
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if creation fails
+</ResponseField>
+
+### GetSenders
+
+Returns the RTPSender that are currently attached to this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2145-2157`
+</Info>
+
+```go
+func (pc *PeerConnection) GetSenders() []*RTPSender
+```
+
+<ResponseField name="senders" type="[]*RTPSender">
+  Array of RTPSenders
+</ResponseField>
+
+### GetReceivers
+
+Returns the RTPReceivers that are currently attached to this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2159-2171`
+</Info>
+
+```go
+func (pc *PeerConnection) GetReceivers() []*RTPReceiver
+```
+
+<ResponseField name="receivers" type="[]*RTPReceiver">
+  Array of RTPReceivers
+</ResponseField>
+
+### GetTransceivers
+
+Returns the RTPTransceivers that are currently attached to this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2173-2179`
+</Info>
+
+```go
+func (pc *PeerConnection) GetTransceivers() []*RTPTransceiver
+```
+
+<ResponseField name="transceivers" type="[]*RTPTransceiver">
+  Array of RTPTransceivers
+</ResponseField>
+
+## Data Channel Methods
+
+### CreateDataChannel
+
+Creates a new DataChannel object with the given label and optional DataChannelInit.
+
+<Info>
+  Source: `peerconnection.go:2357-2442`
+</Info>
+
+```go
+func (pc *PeerConnection) CreateDataChannel(
+    label string,
+    options *DataChannelInit,
+) (*DataChannel, error)
+```
+
+<ParamField path="label" type="string">
+  Label for the data channel
+</ParamField>
+
+<ParamField path="options" type="*DataChannelInit" optional>
+  Optional configuration for the data channel
+</ParamField>
+
+<ResponseField name="dc" type="*DataChannel">
+  The created data channel
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if creation fails or connection is closed
+</ResponseField>
+
+```go
+dc, err := pc.CreateDataChannel("chat", nil)
+if err != nil {
+    return err
+}
+
+dc.OnOpen(func() {
+    fmt.Println("Data channel opened")
+    dc.SendText("Hello!")
+})
+
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    fmt.Printf("Message: %s\n", string(msg.Data))
+})
+```
+
+### OnDataChannel
+
+Sets an event handler which is invoked when a data channel message arrives from a remote peer.
+
+<Info>
+  Source: `peerconnection.go:298-304`
+</Info>
+
+```go
+func (pc *PeerConnection) OnDataChannel(f func(*DataChannel))
+```
+
+<ParamField path="f" type="func(*DataChannel)">
+  Handler called for each incoming data channel
+</ParamField>
+
+```go
+pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+    fmt.Printf("New DataChannel: %s\n", dc.Label())
+    
+    dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+        // Handle message
+    })
+})
+```
+
+## State Accessors
+
+### SignalingState
+
+Returns the signaling state of the PeerConnection instance.
+
+<Info>
+  Source: `peerconnection.go:2668-2672`
+</Info>
+
+```go
+func (pc *PeerConnection) SignalingState() SignalingState
+```
+
+<ResponseField name="state" type="SignalingState">
+  Current signaling state
+</ResponseField>
+
+### ICEGatheringState
+
+Returns the ICE gathering state of the PeerConnection instance.
+
+<Info>
+  Source: `peerconnection.go:2674-2689`
+</Info>
+
+```go
+func (pc *PeerConnection) ICEGatheringState() ICEGatheringState
+```
+
+<ResponseField name="state" type="ICEGatheringState">
+  Current ICE gathering state
+</ResponseField>
+
+### ICEConnectionState
+
+Returns the ICE connection state of the PeerConnection instance.
+
+<Info>
+  Source: `peerconnection.go:2135-2143`
+</Info>
+
+```go
+func (pc *PeerConnection) ICEConnectionState() ICEConnectionState
+```
+
+<ResponseField name="state" type="ICEConnectionState">
+  Current ICE connection state
+</ResponseField>
+
+### ConnectionState
+
+Returns the connection state of the PeerConnection instance.
+
+<Info>
+  Source: `peerconnection.go:2691-2699`
+</Info>
+
+```go
+func (pc *PeerConnection) ConnectionState() PeerConnectionState
+```
+
+<ResponseField name="state" type="PeerConnectionState">
+  Current peer connection state
+</ResponseField>
+
+### CanTrickleICECandidates
+
+Reports whether the remote endpoint indicated support for receiving trickled ICE candidates.
+
+<Info>
+  Source: `peerconnection.go:2659-2666`
+</Info>
+
+```go
+func (pc *PeerConnection) CanTrickleICECandidates() ICETrickleCapability
+```
+
+<ResponseField name="capability" type="ICETrickleCapability">
+  Trickle ICE capability (Unknown, Supported, or Unsupported)
+</ResponseField>
+
+## Event Handlers
+
+### OnSignalingStateChange
+
+Sets an event handler which is invoked when the peer connection's signaling state changes.
+
+<Info>
+  Source: `peerconnection.go:279-285`
+</Info>
+
+```go
+func (pc *PeerConnection) OnSignalingStateChange(f func(SignalingState))
+```
+
+<ParamField path="f" type="func(SignalingState)">
+  Handler called when signaling state changes
+</ParamField>
+
+### OnConnectionStateChange
+
+Sets an event handler which is called when the PeerConnectionState has changed.
+
+<Info>
+  Source: `peerconnection.go:519-523`
+</Info>
+
+```go
+func (pc *PeerConnection) OnConnectionStateChange(f func(PeerConnectionState))
+```
+
+<ParamField path="f" type="func(PeerConnectionState)">
+  Handler called when connection state changes
+</ParamField>
+
+```go
+pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    fmt.Printf("Connection State: %s\n", state.String())
+    
+    if state == webrtc.PeerConnectionStateFailed {
+        // Connection has failed, clean up
+    }
+})
+```
+
+### OnNegotiationNeeded
+
+Sets an event handler which is invoked when a change has occurred which requires session negotiation.
+
+<Info>
+  Source: `peerconnection.go:306-310`
+</Info>
+
+```go
+func (pc *PeerConnection) OnNegotiationNeeded(f func())
+```
+
+<ParamField path="f" type="func()">
+  Handler called when negotiation is needed
+</ParamField>
+
+```go
+pc.OnNegotiationNeeded(func() {
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return
+    }
+    
+    err = pc.SetLocalDescription(offer)
+    if err != nil {
+        return
+    }
+    
+    // Send offer to remote peer
+})
+```
+
+## Configuration Methods
+
+### GetConfiguration
+
+Returns a Configuration object representing the current configuration of this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:632-639`
+</Info>
+
+```go
+func (pc *PeerConnection) GetConfiguration() Configuration
+```
+
+<ResponseField name="config" type="Configuration">
+  Copy of the current configuration
+</ResponseField>
+
+<Note>
+  The returned object is a copy and direct mutation on it will not take effect until SetConfiguration has been called.
+</Note>
+
+### SetConfiguration
+
+Updates the configuration of this PeerConnection object.
+
+<Info>
+  Source: `peerconnection.go:533-630`
+</Info>
+
+```go
+func (pc *PeerConnection) SetConfiguration(configuration Configuration) error
+```
+
+<ParamField path="configuration" type="Configuration">
+  New configuration to apply
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if configuration is invalid or cannot be modified
+</ResponseField>
+
+<Warning>
+  Some configuration properties cannot be modified after initial creation (e.g., Certificates, BundlePolicy, RTCPMuxPolicy).
+</Warning>
+
+## Statistics
+
+### GetStats
+
+Returns data providing statistics about the overall connection.
+
+<Info>
+  Source: `peerconnection.go:2701-2765`
+</Info>
+
+```go
+func (pc *PeerConnection) GetStats() StatsReport
+```
+
+<ResponseField name="report" type="StatsReport">
+  Statistics report for the connection
+</ResponseField>
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    fmt.Printf("%s: %+v\n", stat.GetID(), stat)
+}
+```
+
+## Lifecycle Methods
+
+### Close
+
+Ends the PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:2461-2464`
+</Info>
+
+```go
+func (pc *PeerConnection) Close() error
+```
+
+<ResponseField name="error" type="error">
+  Any errors encountered during closure (may be nil)
+</ResponseField>
+
+```go
+defer pc.Close()
+```
+
+### GracefulClose
+
+Ends the PeerConnection and waits for any goroutines it started to complete.
+
+<Info>
+  Source: `peerconnection.go:2466-2471`
+</Info>
+
+```go
+func (pc *PeerConnection) GracefulClose() error
+```
+
+<ResponseField name="error" type="error">
+  Any errors encountered during closure (may be nil)
+</ResponseField>
+
+<Warning>
+  This is only safe to call outside of PeerConnection callbacks or if in a callback, in its own goroutine.
+</Warning>
+
+## RTCP Methods
+
+### WriteRTCP
+
+Sends a user provided RTCP packet to the connected peer.
+
+<Info>
+  Source: `peerconnection.go:2449-2455`
+</Info>
+
+```go
+func (pc *PeerConnection) WriteRTCP(pkts []rtcp.Packet) error
+```
+
+<ParamField path="pkts" type="[]rtcp.Packet">
+  RTCP packets to send
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if sending fails
+</ResponseField>
+
+<Note>
+  If no peer is connected the packet is discarded. It also runs any configured interceptors.
+</Note>
+
+## Additional Methods
+
+### SCTP
+
+Returns the SCTPTransport for this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:3101-3108`
+</Info>
+
+```go
+func (pc *PeerConnection) SCTP() *SCTPTransport
+```
+
+<ResponseField name="transport" type="*SCTPTransport">
+  The SCTP transport, or nil if SCTP has not been negotiated
+</ResponseField>
+
+### ID
+
+Returns the unique identifier for this PeerConnection.
+
+<Info>
+  Source: `peerconnection.go:641-646`
+</Info>
+
+```go
+func (pc *PeerConnection) ID() string
+```
+
+<ResponseField name="id" type="string">
+  Unique identifier string
+</ResponseField>
+
+## See Also
+
+- [Configuration](/api/configuration) - Connection configuration
+- [SessionDescription](/api/session-description) - SDP management
+- [API](/api/api) - API configuration

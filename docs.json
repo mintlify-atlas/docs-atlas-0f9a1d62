@@ -1,122 +1,132 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Pion WebRTC",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#0ea5e9",
+    "light": "#38bdf8",
+    "dark": "#0284c7"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/pion/webrtc"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/pion/webrtc",
+      "discord": "https://discord.gg/PngbdqpFbt",
+      "twitter": "https://twitter.com/_pion"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/webrtc-overview",
+              "concepts/peer-connection",
+              "concepts/signaling",
+              "concepts/ice-and-connectivity",
+              "concepts/media-streams",
+              "concepts/data-channels"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Examples",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "examples/overview",
+              "examples/media-streaming",
+              "examples/data-channels-basic",
+              "examples/save-to-disk",
+              "examples/broadcast",
+              "examples/rtp-forwarder",
+              "examples/simulcast",
+              "examples/ortc"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Advanced",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "advanced/setting-engine",
+              "advanced/media-engine",
+              "advanced/interceptors",
+              "advanced/custom-logging",
+              "advanced/ice-configuration",
+              "advanced/webassembly"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/migration-v4",
+              "resources/faq",
+              "resources/troubleshooting",
+              "resources/community"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Core API",
             "pages": [
-              "api-reference/introduction"
+              "api/overview",
+              "api/api",
+              "api/peer-connection",
+              "api/configuration",
+              "api/session-description"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Media",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/rtp-transceiver",
+              "api/rtp-sender",
+              "api/rtp-receiver",
+              "api/track-local",
+              "api/track-remote",
+              "api/media-engine"
+            ]
+          },
+          {
+            "group": "Data Channels",
+            "pages": [
+              "api/data-channel",
+              "api/sctp-transport"
+            ]
+          },
+          {
+            "group": "Transport Layer",
+            "pages": [
+              "api/ice-gatherer",
+              "api/ice-transport",
+              "api/dtls-transport",
+              "api/certificate"
+            ]
+          },
+          {
+            "group": "Statistics",
+            "pages": [
+              "api/stats"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

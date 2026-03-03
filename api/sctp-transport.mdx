@@ -1,0 +1,557 @@
+---
+title: 'SCTPTransport'
+description: 'SCTP transport layer for WebRTC data channels'
+---
+
+## Overview
+
+The `SCTPTransport` provides details about the SCTP (Stream Control Transmission Protocol) transport layer that manages data channel connections. It handles the establishment and management of the SCTP association over a DTLS transport.
+
+## Type Definition
+
+```go
+type SCTPTransport struct {
+    // Contains filtered or unexported fields
+}
+```
+
+The SCTPTransport manages the SCTP association, data channel creation, and state transitions.
+
+## Creating an SCTPTransport
+
+### NewSCTPTransport
+
+```go
+func (api *API) NewSCTPTransport(dtls *DTLSTransport) *SCTPTransport
+```
+
+Creates a new SCTPTransport. This constructor is part of the ORTC API and is not meant to be used together with the basic WebRTC API.
+
+<ParamField path="dtls" type="*DTLSTransport" required>
+  The DTLS transport instance to send SCTP packets over.
+</ParamField>
+
+<ResponseField name="return" type="*SCTPTransport">
+  The newly created SCTPTransport instance.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+sctpTransport := api.NewSCTPTransport(dtlsTransport)
+```
+
+</CodeGroup>
+
+## Properties
+
+### Transport
+
+```go
+func (r *SCTPTransport) Transport() *DTLSTransport
+```
+
+Returns the DTLSTransport instance the SCTPTransport is sending over.
+
+### State
+
+```go
+func (r *SCTPTransport) State() SCTPTransportState
+```
+
+Returns the current state of the SCTPTransport.
+
+<ResponseField name="return" type="SCTPTransportState">
+  One of: `SCTPTransportStateConnecting`, `SCTPTransportStateConnected`, or `SCTPTransportStateClosed`.
+</ResponseField>
+
+### MaxChannels
+
+```go
+func (r *SCTPTransport) MaxChannels() uint16
+```
+
+Returns the maximum number of RTCDataChannels that can be open simultaneously.
+
+<ResponseField name="return" type="uint16">
+  The maximum channel count (default: 65535).
+</ResponseField>
+
+### BufferedAmount
+
+```go
+func (r *SCTPTransport) BufferedAmount() int
+```
+
+Returns the total amount (in bytes) of currently buffered user data across all data channels.
+
+<ResponseField name="return" type="int">
+  The total buffered bytes.
+</ResponseField>
+
+## Capabilities
+
+### GetCapabilities
+
+```go
+func (r *SCTPTransport) GetCapabilities() SCTPCapabilities
+```
+
+Returns the SCTPCapabilities of the SCTPTransport, including the maximum message size.
+
+<ResponseField name="return" type="SCTPCapabilities">
+  Capabilities object containing MaxMessageSize and other SCTP settings.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+caps := sctpTransport.GetCapabilities()
+log.Printf("Max message size: %d bytes", caps.MaxMessageSize)
+```
+
+</CodeGroup>
+
+## Lifecycle Management
+
+### Start
+
+```go
+func (r *SCTPTransport) Start(capabilities SCTPCapabilities) error
+```
+
+Starts the SCTPTransport. Since both local and remote parties must mutually create an SCTPTransport, SCTP SO (Simultaneous Open) is used to establish a connection over SCTP.
+
+<ParamField path="capabilities" type="SCTPCapabilities" required>
+  The SCTP capabilities to use for the connection, including MaxMessageSize. If MaxMessageSize is 0, it defaults to the implementation's default value.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns an error if the DTLS transport is not ready, if the SCTP association cannot be established, or if data channels fail to open.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+caps := webrtc.SCTPCapabilities{
+    MaxMessageSize: 262144, // 256 KB
+}
+
+err := sctpTransport.Start(caps)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+</CodeGroup>
+
+<Info>
+Calling `Start()` multiple times is safe; subsequent calls will be ignored if already started.
+</Info>
+
+### Stop
+
+```go
+func (r *SCTPTransport) Stop() error
+```
+
+Stops the SCTPTransport by aborting the SCTP association and closing all data channels.
+
+<ResponseField name="error" type="error">
+  Returns an error if the stop operation fails.
+</ResponseField>
+
+<CodeGroup>
+
+```go Example
+err := sctpTransport.Stop()
+if err != nil {
+    log.Printf("Error stopping SCTP transport: %v", err)
+}
+```
+
+</CodeGroup>
+
+## Event Handlers
+
+### OnDataChannel
+
+```go
+func (r *SCTPTransport) OnDataChannel(f func(*DataChannel))
+```
+
+Sets an event handler invoked when a data channel message arrives from a remote peer.
+
+<ParamField path="f" type="func(*DataChannel)" required>
+  The callback function to invoke when a new data channel is received.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+sctpTransport.OnDataChannel(func(dc *webrtc.DataChannel) {
+    log.Printf("New data channel: %s", dc.Label())
+    
+    dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+        log.Printf("Message from %s: %s", dc.Label(), string(msg.Data))
+    })
+})
+```
+
+</CodeGroup>
+
+<Info>
+This handler runs synchronously to allow setup to complete before data channel event handlers are called.
+</Info>
+
+### OnDataChannelOpened
+
+```go
+func (r *SCTPTransport) OnDataChannelOpened(f func(*DataChannel))
+```
+
+Sets an event handler invoked when a data channel is fully opened and ready to use.
+
+<ParamField path="f" type="func(*DataChannel)" required>
+  The callback function to invoke when a data channel opens.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+sctpTransport.OnDataChannelOpened(func(dc *webrtc.DataChannel) {
+    log.Printf("Data channel opened: %s (ID: %d)", dc.Label(), *dc.ID())
+})
+```
+
+</CodeGroup>
+
+### OnError
+
+```go
+func (r *SCTPTransport) OnError(f func(err error))
+```
+
+Sets an event handler invoked when the SCTP Association encounters an error.
+
+<ParamField path="f" type="func(err error)" required>
+  The callback function to invoke when an error occurs.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+sctpTransport.OnError(func(err error) {
+    log.Printf("SCTP transport error: %v", err)
+})
+```
+
+</CodeGroup>
+
+### OnClose
+
+```go
+func (r *SCTPTransport) OnClose(f func(err error))
+```
+
+Sets an event handler invoked when the SCTP Association closes.
+
+<ParamField path="f" type="func(err error)" required>
+  The callback function to invoke when the transport closes. The error parameter will be nil for clean closes.
+</ParamField>
+
+<CodeGroup>
+
+```go Example
+sctpTransport.OnClose(func(err error) {
+    if err != nil {
+        log.Printf("SCTP transport closed with error: %v", err)
+    } else {
+        log.Println("SCTP transport closed cleanly")
+    }
+})
+```
+
+</CodeGroup>
+
+## Statistics
+
+### Stats
+
+```go
+func (r *SCTPTransport) Stats() SCTPTransportStats
+```
+
+Reports the current statistics of the SCTPTransport.
+
+<ResponseField name="return" type="SCTPTransportStats">
+  Statistics object containing detailed transport metrics.
+</ResponseField>
+
+<Expandable title="SCTPTransportStats Fields">
+  <ResponseField name="Timestamp" type="time.Time">
+    When the statistics were collected.
+  </ResponseField>
+  
+  <ResponseField name="Type" type="StatsType">
+    Always `StatsTypeSCTPTransport`.
+  </ResponseField>
+  
+  <ResponseField name="ID" type="string">
+    Identifier for this statistics object (typically "sctpTransport").
+  </ResponseField>
+  
+  <ResponseField name="BytesSent" type="uint64">
+    Total bytes sent over the SCTP association.
+  </ResponseField>
+  
+  <ResponseField name="BytesReceived" type="uint64">
+    Total bytes received over the SCTP association.
+  </ResponseField>
+  
+  <ResponseField name="SmoothedRoundTripTime" type="float64">
+    Smoothed round-trip time in seconds.
+  </ResponseField>
+  
+  <ResponseField name="CongestionWindow" type="uint32">
+    Current congestion window size in bytes.
+  </ResponseField>
+  
+  <ResponseField name="ReceiverWindow" type="uint32">
+    Current receiver window size in bytes.
+  </ResponseField>
+  
+  <ResponseField name="MTU" type="uint32">
+    Maximum transmission unit size in bytes.
+  </ResponseField>
+</Expandable>
+
+<CodeGroup>
+
+```go Example
+stats := sctpTransport.Stats()
+log.Printf("SCTP Stats:")
+log.Printf("  Bytes sent: %d", stats.BytesSent)
+log.Printf("  Bytes received: %d", stats.BytesReceived)
+log.Printf("  RTT: %.3f seconds", stats.SmoothedRoundTripTime)
+log.Printf("  Congestion window: %d bytes", stats.CongestionWindow)
+log.Printf("  MTU: %d bytes", stats.MTU)
+```
+
+</CodeGroup>
+
+## Internal Operations
+
+The SCTPTransport automatically handles several internal operations:
+
+<AccordionGroup>
+  <Accordion title="Data Channel ID Generation" icon="hashtag">
+    The transport automatically generates unique IDs for data channels based on the DTLS role:
+    - **Client role**: Uses even IDs (0, 2, 4, ...)
+    - **Server role**: Uses odd IDs (1, 3, 5, ...)
+    
+    This ensures no ID conflicts between peers.
+  </Accordion>
+  
+  <Accordion title="Data Channel Acceptance" icon="handshake">
+    When a remote peer creates a data channel, the transport:
+    1. Accepts the incoming SCTP stream
+    2. Parses the channel configuration
+    3. Creates a local DataChannel object
+    4. Triggers the `OnDataChannel` handler
+    5. Triggers the `OnDataChannelOpened` handler when ready
+  </Accordion>
+  
+  <Accordion title="Reliability Configuration" icon="shield">
+    The transport handles different reliability modes:
+    
+    - **Reliable ordered**: Standard TCP-like behavior
+    - **Reliable unordered**: All messages delivered, order not guaranteed
+    - **Partial reliable with retransmit limit**: Limited retransmission attempts
+    - **Partial reliable with time limit**: Messages expire after time window
+    
+    Each mode uses different SCTP channel types internally.
+  </Accordion>
+</AccordionGroup>
+
+## Complete Example
+
+<CodeGroup>
+
+```go ORTC API Example
+package main
+
+import (
+    "log"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create API with custom settings
+    api := webrtc.NewAPI()
+    
+    // Create DTLS transport (assuming you have ICE transport set up)
+    dtlsTransport := api.NewDTLSTransport(iceTransport, nil)
+    
+    // Create SCTP transport
+    sctpTransport := api.NewSCTPTransport(dtlsTransport)
+    
+    // Set up event handlers
+    sctpTransport.OnDataChannel(func(dc *webrtc.DataChannel) {
+        log.Printf("New data channel: %s", dc.Label())
+        
+        dc.OnOpen(func() {
+            log.Printf("Data channel %s opened", dc.Label())
+        })
+        
+        dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+            log.Printf("Message on %s: %s", dc.Label(), string(msg.Data))
+        })
+    })
+    
+    sctpTransport.OnError(func(err error) {
+        log.Printf("SCTP error: %v", err)
+    })
+    
+    sctpTransport.OnClose(func(err error) {
+        if err != nil {
+            log.Printf("SCTP closed with error: %v", err)
+        } else {
+            log.Println("SCTP closed cleanly")
+        }
+    })
+    
+    // Start the transport
+    caps := webrtc.SCTPCapabilities{
+        MaxMessageSize: 262144, // 256 KB
+    }
+    
+    err := sctpTransport.Start(caps)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // Create a data channel
+    params := &webrtc.DataChannelParameters{
+        Label:    "my-channel",
+        Ordered:  true,
+        Protocol: "json",
+    }
+    
+    dc, err := api.NewDataChannel(sctpTransport, params)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    dc.OnOpen(func() {
+        log.Println("Outgoing channel opened")
+        dc.SendText("Hello from ORTC!")
+    })
+    
+    // Continue with signaling and connection setup...
+}
+```
+
+```go Statistics Monitoring
+package main
+
+import (
+    "log"
+    "time"
+    "github.com/pion/webrtc/v4"
+)
+
+func monitorSCTPStats(transport *webrtc.SCTPTransport) {
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        if transport.State() != webrtc.SCTPTransportStateConnected {
+            return
+        }
+        
+        stats := transport.Stats()
+        
+        log.Printf("SCTP Transport Statistics:")
+        log.Printf("  State: %s", transport.State())
+        log.Printf("  Bytes Sent: %d", stats.BytesSent)
+        log.Printf("  Bytes Received: %d", stats.BytesReceived)
+        log.Printf("  Round Trip Time: %.3f sec", stats.SmoothedRoundTripTime)
+        log.Printf("  Congestion Window: %d bytes", stats.CongestionWindow)
+        log.Printf("  Receiver Window: %d bytes", stats.ReceiverWindow)
+        log.Printf("  MTU: %d bytes", stats.MTU)
+        log.Printf("  Buffered Amount: %d bytes", transport.BufferedAmount())
+        log.Printf("  Max Channels: %d", transport.MaxChannels())
+    }
+}
+```
+
+</CodeGroup>
+
+## Configuration Options
+
+The SCTP transport behavior can be customized through the `SettingEngine` before creating the API:
+
+<CodeGroup>
+
+```go Custom SCTP Settings
+se := webrtc.SettingEngine{}
+
+// Set maximum receive buffer size
+se.SetSCTPMaxReceiveBufferSize(2 * 1024 * 1024) // 2 MB
+
+// Enable zero checksum (for testing only)
+se.SetSCTPZeroChecksum(true)
+
+// Set RTO max timeout
+se.SetSCTPRTOMax(800 * time.Millisecond)
+
+// Set minimum congestion window
+se.SetSCTPMinCwnd(4380)
+
+// Create API with custom settings
+api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
+```
+
+</CodeGroup>
+
+<Warning>
+Changing SCTP settings can significantly impact performance and reliability. Only modify these if you understand the implications.
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Handle Errors" icon="exclamation-triangle">
+    Always set up `OnError` handlers to catch and handle SCTP association errors gracefully.
+  </Card>
+  
+  <Card title="Monitor State" icon="signal">
+    Check the transport state before performing operations to avoid errors on closed connections.
+  </Card>
+  
+  <Card title="Configure Limits" icon="gauge">
+    Set appropriate `MaxMessageSize` based on your application's needs and network conditions.
+  </Card>
+  
+  <Card title="Clean Shutdown" icon="power-off">
+    Call `Stop()` when done to properly clean up resources and close all data channels.
+  </Card>
+</CardGroup>
+
+## Related Types
+
+<CardGroup cols={2}>
+  <Card title="DataChannel" icon="exchange-alt" href="/api/data-channel">
+    Individual data channels running over this SCTP transport
+  </Card>
+  <Card title="DTLSTransport" icon="lock">
+    The underlying DTLS transport for secure communication
+  </Card>
+  <Card title="SCTPCapabilities" icon="list">
+    Capabilities and configuration for SCTP connections
+  </Card>
+  <Card title="SCTPTransportState" icon="circle-dot">
+    State enumeration for transport lifecycle
+  </Card>
+</CardGroup>

@@ -1,0 +1,455 @@
+---
+title: 'DTLSTransport'
+description: 'Provides access to DTLS transport for secure RTP/RTCP packet transmission'
+---
+
+## Overview
+
+The `DTLSTransport` allows an application access to information about the DTLS transport over which RTP and RTCP packets are sent and received by RTPSender and RTPReceiver, as well as other data such as SCTP packets sent and received by data channels.
+
+<Note>
+This is part of the ORTC API. It is not meant to be used together with the basic WebRTC API.
+</Note>
+
+## Type Definition
+
+```go dtlstransport.go
+type DTLSTransport struct {
+    // Contains internal state management for DTLS transport
+}
+```
+
+## Constructor
+
+### NewDTLSTransport
+
+Creates a new DTLSTransport over an ICE transport.
+
+```go dtlstransport.go
+func (api *API) NewDTLSTransport(
+    transport *ICETransport, 
+    certificates []Certificate,
+) (*DTLSTransport, error)
+```
+
+<ParamField path="transport" type="*ICETransport" required>
+  The underlying ICE transport to use
+</ParamField>
+
+<ParamField path="certificates" type="[]Certificate">
+  List of certificates to use for DTLS. If empty, a certificate will be generated automatically.
+</ParamField>
+
+<ResponseField name="return" type="*DTLSTransport, error">
+  Returns a new DTLSTransport instance or an error if creation fails
+</ResponseField>
+
+**Example:**
+
+```go
+api := webrtc.NewAPI()
+iceTransport := webrtc.NewICETransport(gatherer, api.LoggerFactory)
+
+// Option 1: Auto-generate certificate
+dtls, err := api.NewDTLSTransport(iceTransport, []webrtc.Certificate{})
+
+// Option 2: Use custom certificates
+cert, _ := webrtc.GenerateCertificate(key)
+dtls, err := api.NewDTLSTransport(iceTransport, []webrtc.Certificate{*cert})
+
+if err != nil {
+    panic(err)
+}
+```
+
+## Methods
+
+### Start
+
+Starts DTLS transport negotiation with the parameters of the remote DTLS transport.
+
+```go dtlstransport.go
+func (t *DTLSTransport) Start(remoteParameters DTLSParameters) error
+```
+
+<ParamField path="remoteParameters" type="DTLSParameters" required>
+  Remote DTLS parameters including fingerprints and role
+  
+  <Expandable title="DTLSParameters structure">
+    <ResponseField name="Role" type="DTLSRole">
+      DTLS role (Auto, Client, Server)
+    </ResponseField>
+    <ResponseField name="Fingerprints" type="[]DTLSFingerprint">
+      Certificate fingerprints for verification
+      
+      <Expandable title="DTLSFingerprint structure">
+        <ResponseField name="Algorithm" type="string">
+          Hash algorithm (e.g., "sha-256")
+        </ResponseField>
+        <ResponseField name="Value" type="string">
+          Fingerprint value
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if the transport cannot be started
+</ResponseField>
+
+**Example:**
+
+```go
+remoteParams := webrtc.DTLSParameters{
+    Role: webrtc.DTLSRoleAuto,
+    Fingerprints: []webrtc.DTLSFingerprint{
+        {
+            Algorithm: "sha-256",
+            Value:     "AA:BB:CC:...",
+        },
+    },
+}
+
+err := dtls.Start(remoteParams)
+if err != nil {
+    panic(err)
+}
+```
+
+### Stop
+
+Stops and closes the DTLSTransport.
+
+```go dtlstransport.go
+func (t *DTLSTransport) Stop() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if stopping fails
+</ResponseField>
+
+**Example:**
+
+```go
+err := dtls.Stop()
+if err != nil {
+    panic(err)
+}
+```
+
+### State
+
+Returns the current DTLS transport state.
+
+```go dtlstransport.go
+func (t *DTLSTransport) State() DTLSTransportState
+```
+
+<ResponseField name="return" type="DTLSTransportState">
+  The current state (New, Connecting, Connected, Closed, Failed)
+</ResponseField>
+
+**Example:**
+
+```go
+state := dtls.State()
+fmt.Printf("DTLS state: %s\n", state)
+```
+
+### ICETransport
+
+Returns the currently-configured ICETransport.
+
+```go dtlstransport.go
+func (t *DTLSTransport) ICETransport() *ICETransport
+```
+
+<ResponseField name="return" type="*ICETransport">
+  Returns the underlying ICE transport or nil if not configured
+</ResponseField>
+
+**Example:**
+
+```go
+iceTransport := dtls.ICETransport()
+if iceTransport != nil {
+    fmt.Printf("ICE transport state: %s\n", iceTransport.State())
+}
+```
+
+### GetLocalParameters
+
+Returns the DTLS parameters of the local DTLSTransport.
+
+```go dtlstransport.go
+func (t *DTLSTransport) GetLocalParameters() (DTLSParameters, error)
+```
+
+<ResponseField name="return" type="DTLSParameters, error">
+  Returns the local DTLS parameters or an error
+</ResponseField>
+
+**Example:**
+
+```go
+params, err := dtls.GetLocalParameters()
+if err != nil {
+    panic(err)
+}
+for _, fp := range params.Fingerprints {
+    fmt.Printf("Fingerprint (%s): %s\n", fp.Algorithm, fp.Value)
+}
+```
+
+### GetRemoteCertificate
+
+Returns the certificate chain in use by the remote side.
+
+```go dtlstransport.go
+func (t *DTLSTransport) GetRemoteCertificate() []byte
+```
+
+<ResponseField name="return" type="[]byte">
+  Returns the raw DER-encoded remote certificate, or an empty slice if not yet selected
+</ResponseField>
+
+**Example:**
+
+```go
+cert := dtls.GetRemoteCertificate()
+if len(cert) > 0 {
+    fmt.Printf("Remote certificate size: %d bytes\n", len(cert))
+}
+```
+
+### OnStateChange
+
+Sets a handler that fires when the DTLS connection state changes.
+
+```go dtlstransport.go
+func (t *DTLSTransport) OnStateChange(f func(DTLSTransportState))
+```
+
+<ParamField path="f" type="func(DTLSTransportState)" required>
+  Callback function that receives state change notifications
+</ParamField>
+
+**Example:**
+
+```go
+dtls.OnStateChange(func(state webrtc.DTLSTransportState) {
+    fmt.Printf("DTLS state changed to: %s\n", state)
+    
+    switch state {
+    case webrtc.DTLSTransportStateConnected:
+        fmt.Println("DTLS handshake complete")
+    case webrtc.DTLSTransportStateFailed:
+        fmt.Println("DTLS handshake failed")
+    case webrtc.DTLSTransportStateClosed:
+        fmt.Println("DTLS transport closed")
+    }
+})
+```
+
+### WriteRTCP
+
+Sends user-provided RTCP packets to the connected peer.
+
+```go dtlstransport.go
+func (t *DTLSTransport) WriteRTCP(pkts []rtcp.Packet) (int, error)
+```
+
+<ParamField path="pkts" type="[]rtcp.Packet" required>
+  RTCP packets to send
+</ParamField>
+
+<ResponseField name="return" type="int, error">
+  Returns the number of bytes written and any error that occurred
+</ResponseField>
+
+**Example:**
+
+```go
+import "github.com/pion/rtcp"
+
+pkt := &rtcp.PictureLossIndication{
+    MediaSSRC: 12345,
+}
+
+n, err := dtls.WriteRTCP([]rtcp.Packet{pkt})
+if err != nil {
+    panic(err)
+}
+fmt.Printf("Wrote %d bytes\n", n)
+```
+
+## States
+
+The DTLSTransport can be in one of the following states:
+
+- **DTLSTransportStateNew**: Initial state
+- **DTLSTransportStateConnecting**: DTLS handshake in progress
+- **DTLSTransportStateConnected**: DTLS handshake completed successfully
+- **DTLSTransportStateClosed**: Transport has been closed
+- **DTLSTransportStateFailed**: DTLS handshake or connection failed
+
+## DTLS Roles
+
+The DTLSTransport can operate in different roles:
+
+- **DTLSRoleAuto**: Role is determined automatically based on ICE role
+- **DTLSRoleClient**: Acts as DTLS client (initiates handshake)
+- **DTLSRoleServer**: Acts as DTLS server (responds to handshake)
+
+## Usage Example
+
+<CodeGroup>
+```go Complete Example
+package main
+
+import (
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create API
+    api := webrtc.NewAPI()
+    
+    // Set up ICE transport
+    gatherer, err := api.NewICEGatherer(webrtc.ICEGatherOptions{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    })
+    if err != nil {
+        panic(err)
+    }
+    
+    iceTransport := webrtc.NewICETransport(gatherer, api.LoggerFactory)
+    
+    // Create DTLS transport with auto-generated certificate
+    dtls, err := api.NewDTLSTransport(iceTransport, []webrtc.Certificate{})
+    if err != nil {
+        panic(err)
+    }
+    defer dtls.Stop()
+    
+    // Set up state change handler
+    dtls.OnStateChange(func(state webrtc.DTLSTransportState) {
+        fmt.Printf("DTLS state: %s\n", state)
+    })
+    
+    // Get local parameters to send via signaling
+    localParams, err := dtls.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("Local DTLS fingerprints: %+v\n", localParams.Fingerprints)
+    
+    // Start ICE
+    if err = gatherer.Gather(); err != nil {
+        panic(err)
+    }
+    
+    iceRole := webrtc.ICERoleControlling
+    if err = iceTransport.Start(nil, remoteICEParams, &iceRole); err != nil {
+        panic(err)
+    }
+    
+    // Start DTLS with remote parameters (from signaling)
+    remoteParams := webrtc.DTLSParameters{
+        Role: webrtc.DTLSRoleAuto,
+        Fingerprints: []webrtc.DTLSFingerprint{
+            {
+                Algorithm: "sha-256",
+                Value:     remoteFingerprintValue,
+            },
+        },
+    }
+    
+    if err = dtls.Start(remoteParams); err != nil {
+        panic(err)
+    }
+    
+    // Wait for DTLS to connect
+    for dtls.State() != webrtc.DTLSTransportStateConnected {
+        if dtls.State() == webrtc.DTLSTransportStateFailed {
+            panic("DTLS failed")
+        }
+        time.Sleep(100 * time.Millisecond)
+    }
+    
+    fmt.Println("DTLS connected successfully!")
+    
+    // Get remote certificate
+    remoteCert := dtls.GetRemoteCertificate()
+    fmt.Printf("Remote certificate: %d bytes\n", len(remoteCert))
+}
+```
+
+```go With Custom Certificate
+package main
+
+import (
+    "crypto/ecdsa"
+    "crypto/elliptic"
+    "crypto/rand"
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    api := webrtc.NewAPI()
+    
+    // Generate a custom certificate
+    secretKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    if err != nil {
+        panic(err)
+    }
+    
+    certificate, err := webrtc.GenerateCertificate(secretKey)
+    if err != nil {
+        panic(err)
+    }
+    
+    fmt.Printf("Certificate expires: %s\n", certificate.Expires())
+    
+    // Create DTLS transport with custom certificate
+    iceTransport := webrtc.NewICETransport(gatherer, api.LoggerFactory)
+    dtls, err := api.NewDTLSTransport(iceTransport, []webrtc.Certificate{*certificate})
+    if err != nil {
+        panic(err)
+    }
+    defer dtls.Stop()
+    
+    // Use the transport...
+}
+```
+</CodeGroup>
+
+## Security Considerations
+
+<Warning>
+DTLS certificate fingerprint verification is critical for security. The fingerprints must be exchanged over a secure signaling channel and verified before establishing the DTLS connection.
+</Warning>
+
+### Fingerprint Verification
+
+The DTLS handshake includes automatic verification of the remote certificate's fingerprint against the fingerprints provided in the remote parameters. This prevents man-in-the-middle attacks.
+
+### Certificate Lifetime
+
+By default, auto-generated certificates are valid for 1 month. For production use, consider:
+
+- Using longer-lived certificates
+- Implementing certificate rotation
+- Monitoring certificate expiration
+
+## See Also
+
+- [ICETransport](/api/ice-transport) - Underlying ICE transport
+- [Certificate](/api/certificate) - DTLS certificate management
+- [PeerConnection](/api/peer-connection) - High-level WebRTC API
+- [SRTP](https://datatracker.ietf.org/doc/html/rfc3711) - Secure RTP specification

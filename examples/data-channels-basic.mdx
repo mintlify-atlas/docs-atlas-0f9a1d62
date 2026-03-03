@@ -1,0 +1,389 @@
+---
+title: "Data Channels"
+description: "Send and receive DataChannel messages between browser and Pion WebRTC server"
+---
+
+The data-channels example demonstrates how to establish a WebRTC connection and exchange arbitrary data between a web browser and a Pion WebRTC server using DataChannels. This is the foundation for building chat applications, game state synchronization, file transfers, and more.
+
+## Overview
+
+DataChannels provide a bidirectional peer-to-peer communication channel that can send arbitrary data. Unlike media tracks which are optimized for real-time audio/video, DataChannels are flexible and can be configured for different reliability and ordering requirements.
+
+## Key Features
+
+- Automatic DataChannel handling from browser
+- Bidirectional message exchange
+- Random message generation every 5 seconds
+- Connection state monitoring
+- Base64 session description encoding for easy copy-paste signaling
+
+## How It Works
+
+<Steps>
+  <Step title="Create PeerConnection">
+    Initialize a new RTCPeerConnection with STUN server configuration:
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    ```
+  </Step>
+  
+  <Step title="Register DataChannel Handler">
+    Set up a handler that fires when the browser creates a DataChannel:
+    ```go
+    peerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+        fmt.Printf("New DataChannel %s %d\n", dataChannel.Label(), dataChannel.ID())
+        
+        // Register handlers for this channel
+        dataChannel.OnOpen(func() {
+            // Channel is ready for communication
+        })
+        
+        dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf("Message from DataChannel '%s': '%s'\n", 
+                dataChannel.Label(), string(msg.Data))
+        })
+    })
+    ```
+  </Step>
+  
+  <Step title="Exchange Session Descriptions">
+    Perform WebRTC handshake by exchanging offer and answer:
+    ```go
+    // Receive offer from browser
+    offer := webrtc.SessionDescription{}
+    decode(readUntilNewline(), &offer)
+    
+    err = peerConnection.SetRemoteDescription(offer)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Create and send answer
+    answer, err := peerConnection.CreateAnswer(nil)
+    if err != nil {
+        panic(err)
+    }
+    
+    err = peerConnection.SetLocalDescription(answer)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Wait for ICE gathering to complete
+    <-webrtc.GatheringCompletePromise(peerConnection)
+    
+    // Output answer to paste in browser
+    fmt.Println(encode(peerConnection.LocalDescription()))
+    ```
+  </Step>
+  
+  <Step title="Send Messages">
+    Once the channel is open, send periodic messages:
+    ```go
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        message, err := randutil.GenerateCryptoRandomString(
+            15, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        )
+        if err != nil {
+            panic(err)
+        }
+        
+        fmt.Printf("Sending '%s'\n", message)
+        if err = dataChannel.SendText(message); err != nil {
+            panic(err)
+        }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Source Code
+
+<CodeGroup>
+```go Main Application
+package main
+
+import (
+    "bufio"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "io"
+    "os"
+    "strings"
+    "time"
+
+    "github.com/pion/randutil"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Prepare the configuration
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+
+    // Create a new RTCPeerConnection
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer func() {
+        if cErr := peerConnection.Close(); cErr != nil {
+            fmt.Printf("cannot close peerConnection: %v\n", cErr)
+        }
+    }()
+
+    // Set the handler for Peer connection state
+    peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+        fmt.Printf("Peer Connection State has changed: %s\n", state.String())
+
+        if state == webrtc.PeerConnectionStateFailed {
+            fmt.Println("Peer Connection has gone to failed exiting")
+            os.Exit(0)
+        }
+
+        if state == webrtc.PeerConnectionStateClosed {
+            fmt.Println("Peer Connection has gone to closed exiting")
+            os.Exit(0)
+        }
+    })
+
+    // Register data channel creation handling
+    peerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+        fmt.Printf("New DataChannel %s %d\n", dataChannel.Label(), dataChannel.ID())
+
+        // Register channel opening handling
+        dataChannel.OnOpen(func() {
+            fmt.Printf(
+                "Data channel '%s'-'%d' open. Random messages will now be sent every 5 seconds\n",
+                dataChannel.Label(), dataChannel.ID(),
+            )
+
+            ticker := time.NewTicker(5 * time.Second)
+            defer ticker.Stop()
+            for range ticker.C {
+                message, sendErr := randutil.GenerateCryptoRandomString(
+                    15, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                )
+                if sendErr != nil {
+                    panic(sendErr)
+                }
+
+                // Send the message as text
+                fmt.Printf("Sending '%s'\n", message)
+                if sendErr = dataChannel.SendText(message); sendErr != nil {
+                    panic(sendErr)
+                }
+            }
+        })
+
+        // Register text message handling
+        dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf("Message from DataChannel '%s': '%s'\n", 
+                dataChannel.Label(), string(msg.Data))
+        })
+    })
+
+    // Wait for the offer to be pasted
+    offer := webrtc.SessionDescription{}
+    decode(readUntilNewline(), &offer)
+
+    // Set the remote SessionDescription
+    err = peerConnection.SetRemoteDescription(offer)
+    if err != nil {
+        panic(err)
+    }
+
+    // Create an answer
+    answer, err := peerConnection.CreateAnswer(nil)
+    if err != nil {
+        panic(err)
+    }
+
+    // Create channel that is blocked until ICE Gathering is complete
+    gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
+
+    // Sets the LocalDescription, and starts our UDP listeners
+    err = peerConnection.SetLocalDescription(answer)
+    if err != nil {
+        panic(err)
+    }
+
+    // Block until ICE Gathering is complete
+    <-gatherComplete
+
+    // Output the answer in base64 so we can paste it in browser
+    fmt.Println(encode(peerConnection.LocalDescription()))
+
+    // Block forever
+    select {}
+}
+```
+
+```go Helper Functions
+// Read from stdin until we get a newline
+func readUntilNewline() (in string) {
+    var err error
+
+    r := bufio.NewReader(os.Stdin)
+    for {
+        in, err = r.ReadString('\n')
+        if err != nil && !errors.Is(err, io.EOF) {
+            panic(err)
+        }
+
+        if in = strings.TrimSpace(in); len(in) > 0 {
+            break
+        }
+    }
+
+    fmt.Println("")
+    return
+}
+
+// JSON encode + base64 a SessionDescription
+func encode(obj *webrtc.SessionDescription) string {
+    b, err := json.Marshal(obj)
+    if err != nil {
+        panic(err)
+    }
+    return base64.StdEncoding.EncodeToString(b)
+}
+
+// Decode a base64 and unmarshal JSON into a SessionDescription
+func decode(in string, obj *webrtc.SessionDescription) {
+    b, err := base64.StdEncoding.DecodeString(in)
+    if err != nil {
+        panic(err)
+    }
+
+    if err = json.Unmarshal(b, obj); err != nil {
+        panic(err)
+    }
+}
+```
+</CodeGroup>
+
+## Important Concepts
+
+<AccordionGroup>
+  <Accordion title="Connection State vs ICE Connection State">
+    The example monitors `PeerConnectionState` rather than `ICEConnectionState`:
+    
+    - **PeerConnectionStateFailed**: No network activity for 30 seconds or another failure occurred
+    - **PeerConnectionStateDisconnected**: Faster timeout detection, but connection may recover
+    - **PeerConnectionStateClosed**: Explicit closure, usually from DTLS CloseNotify
+    
+    Choose the appropriate state based on your reconnection strategy.
+  </Accordion>
+  
+  <Accordion title="Trickle ICE">
+    This example disables Trickle ICE for simplicity:
+    ```go
+    // Wait for all ICE candidates to be gathered
+    <-webrtc.GatheringCompletePromise(peerConnection)
+    ```
+    
+    In production, use Trickle ICE to allow ICE gathering and connection establishment to happen concurrently:
+    ```go
+    peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate != nil {
+            // Send candidate to remote peer via signaling
+        }
+    })
+    ```
+  </Accordion>
+  
+  <Accordion title="DataChannel Reliability">
+    By default, DataChannels are reliable and ordered (like TCP). You can configure them differently:
+    
+    ```go
+    // Unreliable, unordered (like UDP)
+    dataChannel, err := peerConnection.CreateDataChannel("unreliable", &webrtc.DataChannelInit{
+        Ordered: &[]bool{false}[0],
+        MaxRetransmits: &[]uint16{0}[0],
+    })
+    ```
+    
+    This is useful for real-time gaming or other latency-sensitive applications.
+  </Accordion>
+</AccordionGroup>
+
+## Running the Example
+
+<Steps>
+  <Step title="Start the application">
+    ```bash
+    cd examples/data-channels
+    go run main.go
+    ```
+  </Step>
+  
+  <Step title="Open in browser">
+    Navigate to the examples server at `http://localhost` and select the Data Channels example
+  </Step>
+  
+  <Step title="Complete handshake">
+    1. Click to generate an offer in the browser
+    2. Copy the offer and paste it into the terminal
+    3. Copy the answer from the terminal
+    4. Paste the answer back into the browser
+  </Step>
+  
+  <Step title="Exchange messages">
+    - The server will send random messages every 5 seconds
+    - Type messages in the browser to send them to the server
+    - Watch both the browser console and terminal for messages
+  </Step>
+</Steps>
+
+<Tip>
+  DataChannels support both text and binary data. Use `SendText()` for strings and `Send()` for binary data ([]byte).
+</Tip>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Chat Applications" icon="comments">
+    Build real-time messaging with low latency using DataChannels
+  </Card>
+  
+  <Card title="File Transfer" icon="file-arrow-down">
+    Send files peer-to-peer without going through a server
+  </Card>
+  
+  <Card title="Game State Sync" icon="gamepad">
+    Synchronize game state between players in real-time
+  </Card>
+  
+  <Card title="Remote Control" icon="satellite-dish">
+    Send control commands to IoT devices or remote applications
+  </Card>
+</CardGroup>
+
+## Related Examples
+
+- [Data Channels Detach](/examples/data-channels-detach) - Use the lower-level DataChannel API
+- [ORTC](/examples/ortc) - Low-level ORTC API for DataChannels
+- [Pion to Pion](/examples/pion-to-pion) - Two Pion instances communicating directly

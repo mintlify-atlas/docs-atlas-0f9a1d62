@@ -1,0 +1,500 @@
+---
+title: "Simulcast"
+description: "Accept and demux simulcast streams into separate tracks for adaptive bitrate streaming"
+---
+
+The simulcast example demonstrates how to receive a single WebRTC track containing multiple simulcast streams (different quality levels) and demux them into separate tracks. This is essential for implementing adaptive bitrate streaming, bandwidth-adaptive video conferencing, and multi-quality broadcasting.
+
+## Overview
+
+Simulcast allows a sender to transmit the same video at multiple quality levels (resolutions/bitrates) within a single track. The receiver can then select which quality to display based on available bandwidth, screen size, or user preference. This example receives all three simulcast layers and sends them back as independent tracks.
+
+## Key Features
+
+- Receives single track with 3 simulcast streams (low, medium, high quality)
+- Demultiplexes streams by RID (Restriction Identifier)
+- Returns each quality as a separate independent track
+- Periodic PLI (Picture Loss Indication) for keyframe requests
+- Real-time quality switching capability
+
+## Simulcast Stream Naming
+
+The example uses standard simulcast naming:
+
+- **"q"** (quarter): Low quality/resolution stream
+- **"h"** (half): Medium quality/resolution stream  
+- **"f"** (full): High quality/resolution stream
+
+## How It Works
+
+<Steps>
+  <Step title="Create Output Tracks">
+    Prepare three local tracks for the demuxed streams:
+    ```go
+    outputTracks := map[string]*webrtc.TrackLocalStaticRTP{}
+
+    // Low quality track
+    outputTrack, err := webrtc.NewTrackLocalStaticRTP(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+        "video_q",
+        "pion_q",
+    )
+    if err != nil {
+        panic(err)
+    }
+    outputTracks["q"] = outputTrack
+
+    // Medium quality track
+    outputTrack, err = webrtc.NewTrackLocalStaticRTP(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+        "video_h",
+        "pion_h",
+    )
+    if err != nil {
+        panic(err)
+    }
+    outputTracks["h"] = outputTrack
+
+    // High quality track
+    outputTrack, err = webrtc.NewTrackLocalStaticRTP(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+        "video_f",
+        "pion_f",
+    )
+    if err != nil {
+        panic(err)
+    }
+    outputTracks["f"] = outputTrack
+    ```
+  </Step>
+  
+  <Step title="Add Transceivers">
+    Configure transceivers for receiving and sending:
+    ```go
+    // Add receive-only transceiver for incoming simulcast
+    if _, err = peerConnection.AddTransceiverFromKind(
+        webrtc.RTPCodecTypeVideo,
+        webrtc.RTPTransceiverInit{
+            Direction: webrtc.RTPTransceiverDirectionRecvonly,
+        },
+    ); err != nil {
+        panic(err)
+    }
+
+    // Add send-only transceivers for each output track
+    for _, track := range outputTracks {
+        if _, err = peerConnection.AddTransceiverFromTrack(
+            track,
+            webrtc.RTPTransceiverInit{
+                Direction: webrtc.RTPTransceiverDirectionSendonly,
+            },
+        ); err != nil {
+            panic(err)
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Setup RTCP Processing">
+    Read RTCP packets for all senders:
+    ```go
+    processRTCP := func(rtpSender *webrtc.RTPSender) {
+        rtcpBuf := make([]byte, 1500)
+        for {
+            if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+                return
+            }
+        }
+    }
+    
+    for _, rtpSender := range peerConnection.GetSenders() {
+        go processRTCP(rtpSender)
+    }
+    ```
+  </Step>
+  
+  <Step title="Handle Incoming Track">
+    Demux based on RID and forward to appropriate output track:
+    ```go
+    peerConnection.OnTrack(func(
+        track *webrtc.TrackRemote,
+        receiver *webrtc.RTPReceiver,
+    ) {
+        fmt.Println("Track has started")
+
+        // Get the RID (restriction identifier) for this stream
+        rid := track.RID()
+        
+        // Send PLI every 3 seconds for keyframes
+        if track.Kind() == webrtc.RTPCodecTypeVideo {
+            go func() {
+                ticker := time.NewTicker(3 * time.Second)
+                defer ticker.Stop()
+                for range ticker.C {
+                    fmt.Printf(
+                        "Sending PLI for stream with rid: %q, ssrc: %d\n",
+                        track.RID(),
+                        track.SSRC(),
+                    )
+                    if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{
+                        &rtcp.PictureLossIndication{
+                            MediaSSRC: uint32(track.SSRC()),
+                        },
+                    }); writeErr != nil {
+                        fmt.Println(writeErr)
+                    }
+                }
+            }()
+        }
+        
+        // Forward packets to the appropriate output track
+        for {
+            packet, _, readErr := track.ReadRTP()
+            if readErr != nil {
+                panic(readErr)
+            }
+
+            if writeErr := outputTracks[rid].WriteRTP(packet); writeErr != nil &&
+               !errors.Is(writeErr, io.ErrClosedPipe) {
+                panic(writeErr)
+            }
+        }
+    })
+    ```
+  </Step>
+</Steps>
+
+## Complete Source Code
+
+<CodeGroup>
+```go Track Setup
+package main
+
+import (
+    "errors"
+    "fmt"
+    "io"
+    "os"
+    "time"
+
+    "github.com/pion/rtcp"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+
+    outputTracks := map[string]*webrtc.TrackLocalStaticRTP{}
+
+    // Create output tracks for each quality level
+    qualities := []struct {
+        rid   string
+        label string
+    }{
+        {"q", "video_q"},
+        {"h", "video_h"},
+        {"f", "video_f"},
+    }
+
+    for _, quality := range qualities {
+        track, err := webrtc.NewTrackLocalStaticRTP(
+            webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+            quality.label,
+            "pion_"+quality.rid,
+        )
+        if err != nil {
+            panic(err)
+        }
+        outputTracks[quality.rid] = track
+    }
+
+    // Add receive-only transceiver
+    if _, err = peerConnection.AddTransceiverFromKind(
+        webrtc.RTPCodecTypeVideo,
+        webrtc.RTPTransceiverInit{
+            Direction: webrtc.RTPTransceiverDirectionRecvonly,
+        },
+    ); err != nil {
+        panic(err)
+    }
+
+    // Add send-only transceivers for output tracks
+    for _, track := range outputTracks {
+        if _, err = peerConnection.AddTransceiverFromTrack(
+            track,
+            webrtc.RTPTransceiverInit{
+                Direction: webrtc.RTPTransceiverDirectionSendonly,
+            },
+        ); err != nil {
+            panic(err)
+        }
+    }
+
+    // Process RTCP packets
+    processRTCP := func(rtpSender *webrtc.RTPSender) {
+        rtcpBuf := make([]byte, 1500)
+        for {
+            if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+                return
+            }
+        }
+    }
+    for _, rtpSender := range peerConnection.GetSenders() {
+        go processRTCP(rtpSender)
+    }
+
+    // Handle incoming tracks
+    peerConnection.OnTrack(handleTrack(peerConnection, outputTracks))
+
+    // ... signaling code continues
+}
+```
+
+```go Track Handler
+func handleTrack(
+    peerConnection *webrtc.PeerConnection,
+    outputTracks map[string]*webrtc.TrackLocalStaticRTP,
+) func(*webrtc.TrackRemote, *webrtc.RTPReceiver) {
+    return func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+        fmt.Println("Track has started")
+
+        rid := track.RID()
+        
+        // Send periodic PLI for video tracks
+        if track.Kind() == webrtc.RTPCodecTypeVideo {
+            go func() {
+                ticker := time.NewTicker(3 * time.Second)
+                defer ticker.Stop()
+                
+                for range ticker.C {
+                    fmt.Printf(
+                        "Sending PLI for stream with rid: %q, ssrc: %d\n",
+                        track.RID(),
+                        track.SSRC(),
+                    )
+                    
+                    if writeErr := peerConnection.WriteRTCP([]rtcp.Packet{
+                        &rtcp.PictureLossIndication{
+                            MediaSSRC: uint32(track.SSRC()),
+                        },
+                    }); writeErr != nil {
+                        fmt.Println(writeErr)
+                    }
+                }
+            }()
+        }
+        
+        // Forward RTP packets to appropriate output track
+        for {
+            packet, _, readErr := track.ReadRTP()
+            if readErr != nil {
+                panic(readErr)
+            }
+
+            if writeErr := outputTracks[rid].WriteRTP(packet); writeErr != nil &&
+               !errors.Is(writeErr, io.ErrClosedPipe) {
+                panic(writeErr)
+            }
+        }
+    }
+}
+```
+
+```go Connection State
+peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    fmt.Printf("Peer Connection State has changed: %s\n", state.String())
+
+    if state == webrtc.PeerConnectionStateFailed {
+        fmt.Println("Peer Connection has gone to failed exiting")
+        os.Exit(0)
+    }
+
+    if state == webrtc.PeerConnectionStateClosed {
+        fmt.Println("Peer Connection has gone to closed exiting")
+        os.Exit(0)
+    }
+})
+```
+</CodeGroup>
+
+## Important Implementation Details
+
+<AccordionGroup>
+  <Accordion title="RID (Restriction Identifier)">
+    RID identifies which simulcast stream a packet belongs to:
+    
+    ```go
+    rid := track.RID()
+    ```
+    
+    Common RID values:
+    - **"q"** or **"0"**: Lowest quality (quarter resolution)
+    - **"h"** or **"1"**: Medium quality (half resolution)
+    - **"f"** or **"2"**: Highest quality (full resolution)
+    
+    The RID maps incoming packets to the correct output track for demuxing.
+  </Accordion>
+  
+  <Accordion title="PLI (Picture Loss Indication)">
+    The example sends PLI every 3 seconds to request keyframes:
+    
+    ```go
+    peerConnection.WriteRTCP([]rtcp.Packet{
+        &rtcp.PictureLossIndication{
+            MediaSSRC: uint32(track.SSRC()),
+        },
+    })
+    ```
+    
+    **Why this matters:**
+    - Ensures each stream has recent keyframes
+    - Enables quick quality switching
+    - Helps with error recovery
+    
+    For production, adjust PLI frequency based on:
+    - Network conditions
+    - Available bandwidth
+    - Quality switching patterns
+  </Accordion>
+  
+  <Accordion title="Transceiver Direction">
+    The example explicitly sets transceiver directions:
+    
+    ```go
+    // Receive simulcast from browser
+    webrtc.RTPTransceiverDirectionRecvonly
+    
+    // Send demuxed streams back to browser
+    webrtc.RTPTransceiverDirectionSendonly
+    ```
+    
+    This ensures proper negotiation and prevents unnecessary media pipelines.
+  </Accordion>
+  
+  <Accordion title="Quality Selection">
+    While this example sends all three qualities back, in production you would:
+    
+    1. **Monitor bandwidth** using RTCP feedback
+    2. **Select appropriate quality** based on:
+       - Available bandwidth
+       - Screen size/viewport
+       - CPU capabilities
+       - User preferences
+    3. **Switch dynamically** between qualities
+    
+    Example quality selection logic:
+    ```go
+    func selectQuality(bandwidth int) string {
+        switch {
+        case bandwidth > 2000000: // 2 Mbps
+            return "f" // Full quality
+        case bandwidth > 500000:  // 500 Kbps
+            return "h" // Half quality
+        default:
+            return "q" // Quarter quality
+        }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Browser Configuration
+
+To enable simulcast in the browser, configure the sender:
+
+```javascript
+const sender = pc.addTrack(videoTrack, stream);
+
+const params = sender.getParameters();
+if (!params.encodings) {
+    params.encodings = [
+        { rid: 'f', maxBitrate: 2000000 },  // Full: 2 Mbps
+        { rid: 'h', maxBitrate: 500000, scaleResolutionDownBy: 2 },  // Half: 500 Kbps, 1/2 res
+        { rid: 'q', maxBitrate: 150000, scaleResolutionDownBy: 4 },  // Quarter: 150 Kbps, 1/4 res
+    ];
+}
+await sender.setParameters(params);
+```
+
+## Running the Example
+
+<Steps>
+  <Step title="Start the application">
+    ```bash
+    cd examples/simulcast
+    go run main.go
+    ```
+  </Step>
+  
+  <Step title="Configure browser for simulcast">
+    Open the simulcast example page which automatically configures three encoding layers
+  </Step>
+  
+  <Step title="Complete handshake">
+    Exchange SDP offer/answer through the copy-paste signaling
+  </Step>
+  
+  <Step title="Observe streams">
+    You should see:
+    - Terminal logs showing PLI requests for each RID
+    - Three separate video elements in the browser showing different qualities
+    - All three streams playing simultaneously
+  </Step>
+</Steps>
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Adaptive Streaming" icon="gauge-high">
+    Automatically switch quality based on network conditions for smooth playback
+  </Card>
+  
+  <Card title="Video Conferencing" icon="users">
+    Show active speaker in high quality, thumbnails in low quality
+  </Card>
+  
+  <Card title="Broadcasting" icon="tower-broadcast">
+    Serve different qualities to viewers with varying bandwidth
+  </Card>
+  
+  <Card title="Recording" icon="record-vinyl">
+    Record multiple qualities simultaneously for later transcoding
+  </Card>
+</CardGroup>
+
+## Performance Considerations
+
+<Note>
+  **Bandwidth Usage:** Simulcast increases upload bandwidth by 2-3x compared to single stream. Ensure the sender has sufficient bandwidth:
+  
+  - Single stream: ~1-2 Mbps
+  - Simulcast (3 layers): ~2.5-3.5 Mbps
+  
+  The benefit is that each receiver can choose their quality, reducing download bandwidth.
+</Note>
+
+<Tip>
+  For optimal results:
+  - Use simulcast when you have multiple viewers with varying bandwidth
+  - Consider SVC (Scalable Video Coding) as an alternative with lower upload requirements
+  - Implement adaptive bitrate switching on the receiver side
+  - Monitor RTCP feedback for quality decisions
+</Tip>
+
+## Related Examples
+
+- [Broadcast](/examples/broadcast) - Forward streams to multiple viewers
+- [Save to Disk](/examples/save-to-disk) - Record specific quality levels
+- [RTP Forwarder](/examples/rtp-forwarder) - Forward selected quality via RTP

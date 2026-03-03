@@ -1,0 +1,417 @@
+---
+title: TrackRemote
+description: Represents a single inbound source of media.
+---
+
+## Overview
+
+TrackRemote represents a single inbound source of media. It provides methods to read RTP packets, access track metadata, and handle retransmission (RTX) streams.
+
+## Type Definition
+
+```go
+type TrackRemote struct {
+    mu              sync.RWMutex
+    id              string
+    streamID        string
+    payloadType     PayloadType
+    kind            RTPCodecType
+    ssrc            SSRC
+    rtxSsrc         SSRC
+    codec           RTPCodecParameters
+    params          RTPParameters
+    rid             string
+    receiver        *RTPReceiver
+    peekedPackets   []*peekedPacket
+    audioPlayoutStatsProviders []AudioPlayoutStatsProvider
+}
+```
+
+## Methods
+
+### ID
+
+Returns the unique identifier for this Track. This should be unique for the stream, but doesn't have to be globally unique. A common example would be 'audio' or 'video' and StreamID would be 'desktop' or 'webcam'.
+
+```go
+func (t *TrackRemote) ID() string
+```
+
+<ResponseField name="id" type="string">
+  The track identifier
+</ResponseField>
+
+### RID
+
+Gets the RTP Stream ID of this Track. With Simulcast you will have multiple tracks with the same ID, but different RID values. In many cases a TrackRemote will not have an RID, so it is important to assert it is non-zero.
+
+```go
+func (t *TrackRemote) RID() string
+```
+
+<ResponseField name="rid" type="string">
+  The RTP stream identifier, or empty string if not set
+</ResponseField>
+
+### PayloadType
+
+Gets the PayloadType of the track.
+
+```go
+func (t *TrackRemote) PayloadType() PayloadType
+```
+
+<ResponseField name="payloadType" type="PayloadType">
+  The RTP payload type number
+</ResponseField>
+
+### Kind
+
+Gets the Kind of the track (audio or video).
+
+```go
+func (t *TrackRemote) Kind() RTPCodecType
+```
+
+<ResponseField name="kind" type="RTPCodecType">
+  Either RTPCodecTypeAudio or RTPCodecTypeVideo
+</ResponseField>
+
+### StreamID
+
+Returns the group this track belongs to. This must be unique.
+
+```go
+func (t *TrackRemote) StreamID() string
+```
+
+<ResponseField name="streamID" type="string">
+  The stream identifier
+</ResponseField>
+
+### SSRC
+
+Gets the SSRC of the track.
+
+```go
+func (t *TrackRemote) SSRC() SSRC
+```
+
+<ResponseField name="ssrc" type="SSRC">
+  The synchronization source identifier
+</ResponseField>
+
+### Msid
+
+Gets the Msid (Media Stream ID) of the track.
+
+```go
+func (t *TrackRemote) Msid() string
+```
+
+<ResponseField name="msid" type="string">
+  The media stream ID in format "streamID trackID"
+</ResponseField>
+
+### Codec
+
+Gets the Codec of the track.
+
+```go
+func (t *TrackRemote) Codec() RTPCodecParameters
+```
+
+<ResponseField name="codec" type="RTPCodecParameters">
+  The codec parameters including mime type, clock rate, and format parameters
+</ResponseField>
+
+### Read
+
+Reads data from the track.
+
+```go
+func (t *TrackRemote) Read(b []byte) (n int, attributes interceptor.Attributes, err error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Buffer to read RTP packet data into
+</ParamField>
+
+<ResponseField name="n" type="int">
+  Number of bytes read
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes associated with the packet
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns io.EOF if receiver is closed, or other errors on read failure
+</ResponseField>
+
+<Note>
+This method automatically handles RTX (retransmission) packets if available, transparently merging them into the main stream.
+</Note>
+
+### ReadRTP
+
+A convenience method that wraps Read and unmarshals for you.
+
+```go
+func (t *TrackRemote) ReadRTP() (*rtp.Packet, interceptor.Attributes, error)
+```
+
+<ResponseField name="packet" type="*rtp.Packet">
+  The unmarshaled RTP packet
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if read or unmarshal fails
+</ResponseField>
+
+<CodeGroup>
+```go Basic Usage
+for {
+    packet, attributes, err := track.ReadRTP()
+    if err != nil {
+        return err
+    }
+    
+    fmt.Printf("Received RTP: SSRC=%d, Seq=%d, Timestamp=%d\n",
+        packet.SSRC, packet.SequenceNumber, packet.Timestamp)
+    
+    // Process packet payload
+    processMedia(packet.Payload)
+}
+```
+
+```go With Attributes
+for {
+    packet, attributes, err := track.ReadRTP()
+    if err != nil {
+        return err
+    }
+    
+    // Check if packet was received via RTX
+    if rtxSsrc, ok := attributes.Get(webrtc.AttributeRtxSsrc).(uint32); ok {
+        fmt.Printf("Packet recovered via RTX from SSRC %d\n", rtxSsrc)
+    }
+}
+```
+</CodeGroup>
+
+### SetReadDeadline
+
+Sets the max amount of time the RTP stream will block before returning. 0 is forever.
+
+```go
+func (t *TrackRemote) SetReadDeadline(deadline time.Time) error
+```
+
+<ParamField path="deadline" type="time.Time" required>
+  The deadline time. Zero value means no deadline.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if setting the deadline fails
+</ResponseField>
+
+### RtxSSRC
+
+Returns the RTX SSRC for a track, or 0 if track does not have a separate RTX stream.
+
+```go
+func (t *TrackRemote) RtxSSRC() SSRC
+```
+
+<ResponseField name="rtxSsrc" type="SSRC">
+  The RTX synchronization source identifier, or 0 if RTX is not enabled
+</ResponseField>
+
+### HasRTX
+
+Returns true if the track has a separate RTX stream.
+
+```go
+func (t *TrackRemote) HasRTX() bool
+```
+
+<ResponseField name="hasRtx" type="bool">
+  True if RTX is enabled for this track
+</ResponseField>
+
+## Usage Examples
+
+### Basic Track Handling
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    fmt.Printf("Track started:\n")
+    fmt.Printf("  ID: %s\n", track.ID())
+    fmt.Printf("  Stream ID: %s\n", track.StreamID())
+    fmt.Printf("  Kind: %s\n", track.Kind())
+    fmt.Printf("  SSRC: %d\n", track.SSRC())
+    fmt.Printf("  Codec: %s\n", track.Codec().MimeType)
+    
+    for {
+        packet, _, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        // Process RTP packet
+        fmt.Printf("RTP: %d bytes\n", len(packet.Payload))
+    }
+})
+```
+
+### Saving Track to File
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    codec := track.Codec()
+    
+    if codec.MimeType != webrtc.MimeTypeVP8 {
+        return
+    }
+    
+    // Create output file
+    file, err := os.Create("output.ivf")
+    if err != nil {
+        panic(err)
+    }
+    defer file.Close()
+    
+    // Write IVF header
+    ivfWriter, err := ivfwriter.New(file, codec.ClockRate)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Read and save packets
+    for {
+        packet, _, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        if err := ivfWriter.WriteRTP(packet); err != nil {
+            return
+        }
+    }
+})
+```
+
+### Handling Simulcast Tracks
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    rid := track.RID()
+    
+    if rid != "" {
+        fmt.Printf("Simulcast track with RID: %s\n", rid)
+    }
+    
+    // Get all simulcast tracks
+    tracks := receiver.Tracks()
+    fmt.Printf("Total tracks in receiver: %d\n", len(tracks))
+    
+    for _, t := range tracks {
+        fmt.Printf("  RID: %s, SSRC: %d\n", t.RID(), t.SSRC())
+    }
+})
+```
+
+### Checking RTX Support
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    if track.HasRTX() {
+        fmt.Printf("Track has RTX support\n")
+        fmt.Printf("Main SSRC: %d\n", track.SSRC())
+        fmt.Printf("RTX SSRC: %d\n", track.RtxSSRC())
+    } else {
+        fmt.Printf("No RTX support\n")
+    }
+    
+    for {
+        packet, attributes, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        // Check if this packet was retransmitted
+        if rtxSsrc, ok := attributes.Get(webrtc.AttributeRtxSsrc).(uint32); ok {
+            fmt.Printf("Retransmitted packet from SSRC %d\n", rtxSsrc)
+        }
+    }
+})
+```
+
+### Setting Read Timeout
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    // Set 5 second timeout
+    deadline := time.Now().Add(5 * time.Second)
+    if err := track.SetReadDeadline(deadline); err != nil {
+        panic(err)
+    }
+    
+    packet, _, err := track.ReadRTP()
+    if err != nil {
+        if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+            fmt.Println("Read timeout")
+        }
+        return
+    }
+    
+    // Clear deadline
+    track.SetReadDeadline(time.Time{})
+})
+```
+
+### Forwarding Track to Another Peer
+
+```go
+// Receive track from one peer
+peerConnection1.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    // Create local track to forward
+    localTrack, err := webrtc.NewTrackLocalStaticRTP(
+        remoteTrack.Codec().RTPCodecCapability,
+        remoteTrack.ID(),
+        remoteTrack.StreamID(),
+    )
+    if err != nil {
+        panic(err)
+    }
+    
+    // Add to second peer connection
+    _, err = peerConnection2.AddTrack(localTrack)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Forward packets
+    for {
+        packet, _, err := remoteTrack.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        if err := localTrack.WriteRTP(packet); err != nil {
+            return
+        }
+    }
+})
+```
+
+## See Also
+
+- [RTPReceiver](/api/rtp-receiver) - Manages inbound RTP streams
+- [TrackLocal](/api/track-local) - Local media track interface
+- [RTPTransceiver](/api/rtp-transceiver) - Combines sender and receiver

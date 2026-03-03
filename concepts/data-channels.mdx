@@ -1,0 +1,666 @@
+---
+title: 'Data Channels'
+description: 'Bidirectional data transfer over SCTP in Pion WebRTC'
+---
+
+## Overview
+
+Data channels provide a way to send arbitrary application data between peers using the SCTP protocol over DTLS. Unlike media tracks, data channels can send any binary or text data with configurable reliability and ordering guarantees.
+
+## DataChannel Structure
+
+From the Pion source code:
+
+```go datachannel.go
+// DataChannel represents a WebRTC DataChannel
+// The DataChannel interface represents a network channel
+// which can be used for bidirectional peer-to-peer transfers of arbitrary data.
+type DataChannel struct {
+    mu sync.RWMutex
+
+    statsID                    string
+    label                      string
+    ordered                    bool
+    maxPacketLifeTime          *uint16
+    maxRetransmits             *uint16
+    protocol                   string
+    negotiated                 bool
+    id                         *uint16
+    readyState                 atomic.Value // DataChannelState
+    bufferedAmountLowThreshold uint64
+
+    onMessageHandler    func(DataChannelMessage)
+    onOpenHandler       func()
+    onCloseHandler      func()
+    onBufferedAmountLow func()
+    onErrorHandler      func(error)
+
+    sctpTransport *SCTPTransport
+    dataChannel   *datachannel.DataChannel
+
+    api *API
+    log logging.LeveledLogger
+}
+```
+
+## Creating Data Channels
+
+### Creating on Peer Connection
+
+```go
+import "github.com/pion/webrtc/v4"
+
+// Create data channel with label
+dc, err := pc.CreateDataChannel("data", nil)
+if err != nil {
+    panic(err)
+}
+
+// Set up handlers before opening
+dc.OnOpen(func() {
+    fmt.Println("Data channel opened")
+})
+
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    fmt.Printf("Message: %s\n", string(msg.Data))
+})
+```
+
+### With Configuration
+
+```go
+dc, err := pc.CreateDataChannel("reliable", &webrtc.DataChannelInit{
+    Ordered:           true,
+    MaxRetransmits:    nil, // Unlimited retransmits
+    MaxPacketLifeTime: nil,
+    Protocol:          "json",
+    Negotiated:        false,
+})
+```
+
+<Note>
+Data channels created with `CreateDataChannel()` are negotiated in-band. The remote peer receives them via the `OnDataChannel` callback.
+</Note>
+
+## Data Channel Options
+
+### Reliability Options
+
+<CardGroup cols={2}>
+  <Card title="Reliable Ordered" icon="check-double">
+    All messages delivered in order (default).
+  </Card>
+  <Card title="Reliable Unordered" icon="shuffle">
+    All messages delivered, order not guaranteed.
+  </Card>
+  <Card title="Unreliable with Retransmits" icon="repeat">
+    Limited retransmissions, may lose messages.
+  </Card>
+  <Card title="Unreliable with Lifetime" icon="clock">
+    Messages dropped after time limit.
+  </Card>
+</CardGroup>
+
+From the source code, here's how channel types are determined:
+
+```go datachannel.go
+func (d *DataChannel) open(sctpTransport *SCTPTransport) error {
+    var channelType datachannel.ChannelType
+    var reliabilityParameter uint32
+
+    switch {
+    case d.maxPacketLifeTime == nil && d.maxRetransmits == nil:
+        if d.ordered {
+            channelType = datachannel.ChannelTypeReliable
+        } else {
+            channelType = datachannel.ChannelTypeReliableUnordered
+        }
+
+    case d.maxRetransmits != nil:
+        reliabilityParameter = uint32(*d.maxRetransmits)
+        if d.ordered {
+            channelType = datachannel.ChannelTypePartialReliableRexmit
+        } else {
+            channelType = datachannel.ChannelTypePartialReliableRexmitUnordered
+        }
+    default:
+        reliabilityParameter = uint32(*d.maxPacketLifeTime)
+        if d.ordered {
+            channelType = datachannel.ChannelTypePartialReliableTimed
+        } else {
+            channelType = datachannel.ChannelTypePartialReliableTimedUnordered
+        }
+    }
+    
+    // Create channel with parameters...
+}
+```
+
+### Example Configurations
+
+```go
+// Reliable, ordered (like TCP)
+reliable, _ := pc.CreateDataChannel("reliable", &webrtc.DataChannelInit{
+    Ordered: true,
+})
+
+// Unreliable, unordered (like UDP)
+var maxRetransmits uint16 = 0
+unreliable, _ := pc.CreateDataChannel("unreliable", &webrtc.DataChannelInit{
+    Ordered:        false,
+    MaxRetransmits: &maxRetransmits,
+})
+
+// Partial reliability with 3 retransmits
+var retries uint16 = 3
+partial, _ := pc.CreateDataChannel("partial", &webrtc.DataChannelInit{
+    Ordered:        true,
+    MaxRetransmits: &retries,
+})
+
+// Time-based reliability (500ms)
+var lifetime uint16 = 500
+timed, _ := pc.CreateDataChannel("timed", &webrtc.DataChannelInit{
+    MaxPacketLifeTime: &lifetime,
+})
+```
+
+## Sending Data
+
+### Text Messages
+
+```go datachannel.go
+// SendText sends the text message to the DataChannel peer.
+func (d *DataChannel) SendText(s string) error {
+    err := d.ensureOpen()
+    if err != nil {
+        return err
+    }
+
+    _, err = d.dataChannel.WriteDataChannel([]byte(s), true)
+    return err
+}
+```
+
+Usage:
+
+```go
+dc.OnOpen(func() {
+    if err := dc.SendText("Hello, WebRTC!"); err != nil {
+        log.Printf("Send error: %v", err)
+    }
+})
+```
+
+### Binary Data
+
+```go datachannel.go
+// Send sends the binary message to the DataChannel peer.
+func (d *DataChannel) Send(data []byte) error {
+    err := d.ensureOpen()
+    if err != nil {
+        return err
+    }
+
+    _, err = d.dataChannel.WriteDataChannel(data, false)
+    return err
+}
+```
+
+Usage:
+
+```go
+// Send binary data
+data := []byte{0x01, 0x02, 0x03, 0x04}
+if err := dc.Send(data); err != nil {
+    log.Printf("Send error: %v", err)
+}
+
+// Send JSON
+type Message struct {
+    Type string `json:"type"`
+    Data string `json:"data"`
+}
+
+msg := Message{Type: "chat", Data: "Hello"}
+jsonData, _ := json.Marshal(msg)
+dc.Send(jsonData)
+```
+
+<Warning>
+Always check if the data channel is open before sending. Sending on a closed channel will return an error.
+</Warning>
+
+## Receiving Data
+
+### OnMessage Handler
+
+```go
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    if msg.IsString {
+        fmt.Printf("Text message: %s\n", string(msg.Data))
+    } else {
+        fmt.Printf("Binary message: %d bytes\n", len(msg.Data))
+    }
+})
+```
+
+The message structure:
+
+```go datachannelmessage.go
+type DataChannelMessage struct {
+    Data     []byte
+    IsString bool
+}
+```
+
+### Reading Loop Implementation
+
+From the source code:
+
+```go datachannel.go
+func (d *DataChannel) readLoop() {
+    buffer := make([]byte, sctpMaxMessageSizeUnsetValue)
+    for {
+        n, isString, err := d.dataChannel.ReadDataChannel(buffer)
+        if err != nil {
+            if errors.Is(err, io.ErrShortBuffer) {
+                if int64(n) < int64(d.api.settingEngine.getSCTPMaxMessageSize()) {
+                    buffer = append(buffer, make([]byte, len(buffer))...)
+                    continue
+                }
+
+                d.log.Errorf(
+                    "Incoming DataChannel message larger then Max Message size %v",
+                    d.api.settingEngine.getSCTPMaxMessageSize(),
+                )
+            }
+
+            d.setReadyState(DataChannelStateClosed)
+            if !errors.Is(err, io.EOF) {
+                d.onError(err)
+            }
+            d.onClose()
+            return
+        }
+
+        d.onMessage(DataChannelMessage{
+            Data:     append([]byte{}, buffer[:n]...),
+            IsString: isString,
+        })
+    }
+}
+```
+
+## Data Channel States
+
+Data channels go through several states:
+
+<Steps>
+  <Step title="Connecting">
+    Channel is being established.
+  </Step>
+  <Step title="Open">
+    Channel is open and ready to send/receive.
+  </Step>
+  <Step title="Closing">
+    Close has been called, but not complete.
+  </Step>
+  <Step title="Closed">
+    Channel is closed.
+  </Step>
+</Steps>
+
+### Monitoring State
+
+```go
+dc.OnOpen(func() {
+    fmt.Printf("Data channel '%s' opened\n", dc.Label())
+    
+    // Now safe to send
+    dc.SendText("Connected!")
+})
+
+dc.OnClose(func() {
+    fmt.Printf("Data channel '%s' closed\n", dc.Label())
+})
+
+dc.OnError(func(err error) {
+    fmt.Printf("Data channel error: %v\n", err)
+})
+```
+
+## Receiving Data Channels
+
+```go
+pc.OnDataChannel(func(dc *webrtc.DataChannel) {
+    fmt.Printf("New data channel: %s\n", dc.Label())
+    
+    dc.OnOpen(func() {
+        fmt.Println("Data channel opened")
+    })
+    
+    dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+        // Echo messages back
+        if msg.IsString {
+            dc.SendText(string(msg.Data))
+        } else {
+            dc.Send(msg.Data)
+        }
+    })
+})
+```
+
+From the source:
+
+```go peerconnection.go
+// OnDataChannel sets an event handler which is invoked when a data
+// channel message arrives from a remote peer.
+func (pc *PeerConnection) OnDataChannel(f func(*DataChannel)) {
+    pc.mu.Lock()
+    defer pc.mu.Unlock()
+    pc.onDataChannelHandler = f
+}
+```
+
+## Buffered Amount
+
+Monitor how much data is queued for sending:
+
+```go datachannel.go
+// BufferedAmount represents the number of bytes of application data
+// that have been queued using send().
+func (d *DataChannel) BufferedAmount() uint64 {
+    d.mu.RLock()
+    defer d.mu.RUnlock()
+
+    if d.dataChannel == nil {
+        return 0
+    }
+
+    return d.dataChannel.BufferedAmount()
+}
+```
+
+Usage:
+
+```go
+// Set threshold for low buffered amount
+dc.SetBufferedAmountLowThreshold(1024 * 1024) // 1 MB
+
+dc.OnBufferedAmountLow(func() {
+    fmt.Println("Buffer cleared, safe to send more data")
+})
+
+// Check before sending large data
+if dc.BufferedAmount() < 1024*1024 {
+    dc.Send(largeData)
+}
+```
+
+From the source:
+
+```go datachannel.go
+func (d *DataChannel) SetBufferedAmountLowThreshold(th uint64) {
+    d.mu.Lock()
+    defer d.mu.Unlock()
+
+    d.bufferedAmountLowThreshold = th
+
+    if d.dataChannel != nil {
+        d.dataChannel.SetBufferedAmountLowThreshold(th)
+    }
+}
+```
+
+## Pre-negotiated Data Channels
+
+Create matching channels on both sides without in-band negotiation:
+
+```go
+// Peer A
+var channelID uint16 = 0
+dcA, _ := pc.CreateDataChannel("sync", &webrtc.DataChannelInit{
+    ID:         &channelID,
+    Negotiated: true,
+})
+
+// Peer B
+var channelID uint16 = 0
+dcB, _ := pc.CreateDataChannel("sync", &webrtc.DataChannelInit{
+    ID:         &channelID,
+    Negotiated: true,
+})
+```
+
+<Tip>
+Pre-negotiated channels don't require signaling and can be created before the connection is established.
+</Tip>
+
+## Detached Mode
+
+For advanced use cases, detach the data channel to get raw read/write access:
+
+```go datachannel.go
+// Detach allows you to detach the underlying datachannel.
+func (d *DataChannel) Detach() (datachannel.ReadWriteCloser, error) {
+    d.mu.Lock()
+
+    if !d.api.settingEngine.detach.DataChannels {
+        d.mu.Unlock()
+        return nil, errDetachNotEnabled
+    }
+
+    if d.dataChannel == nil {
+        d.mu.Unlock()
+        return nil, errDetachBeforeOpened
+    }
+
+    d.detachCalled = true
+    dataChannel := d.dataChannel
+    d.mu.Unlock()
+    
+    return dataChannel, nil
+}
+```
+
+Usage:
+
+```go
+import "github.com/pion/webrtc/v4"
+
+// Enable detach mode
+settingEngine := webrtc.SettingEngine{}
+settingEngine.DetachDataChannels()
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(settingEngine))
+pc, _ := api.NewPeerConnection(config)
+
+dc, _ := pc.CreateDataChannel("detached", nil)
+
+dc.OnOpen(func() {
+    // Detach the data channel
+    raw, err := dc.Detach()
+    if err != nil {
+        panic(err)
+    }
+    
+    // Use as io.ReadWriteCloser
+    go func() {
+        buf := make([]byte, 1024)
+        for {
+            n, err := raw.Read(buf)
+            if err != nil {
+                return
+            }
+            // Process raw data
+            raw.Write(buf[:n]) // Echo back
+        }
+    }()
+})
+```
+
+## Closing Data Channels
+
+```go datachannel.go
+// Close Closes the DataChannel.
+func (d *DataChannel) Close() error {
+    return d.close(false)
+}
+
+// GracefulClose Closes the DataChannel and waits for goroutines to complete.
+func (d *DataChannel) GracefulClose() error {
+    return d.close(true)
+}
+```
+
+Usage:
+
+```go
+// Normal close
+if err := dc.Close(); err != nil {
+    log.Printf("Close error: %v", err)
+}
+
+// Graceful close (waits for read loop)
+if err := dc.GracefulClose(); err != nil {
+    log.Printf("Graceful close error: %v", err)
+}
+```
+
+## Common Patterns
+
+### Request/Response
+
+```go
+import "encoding/json"
+
+type Request struct {
+    ID     string      `json:"id"`
+    Method string      `json:"method"`
+    Params interface{} `json:"params"`
+}
+
+type Response struct {
+    ID     string      `json:"id"`
+    Result interface{} `json:"result"`
+    Error  *string     `json:"error,omitempty"`
+}
+
+func sendRequest(dc *webrtc.DataChannel, method string, params interface{}) {
+    req := Request{
+        ID:     generateID(),
+        Method: method,
+        Params: params,
+    }
+    
+    data, _ := json.Marshal(req)
+    dc.Send(data)
+}
+
+dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+    var req Request
+    json.Unmarshal(msg.Data, &req)
+    
+    // Handle request and send response
+    resp := Response{
+        ID:     req.ID,
+        Result: handleRequest(req.Method, req.Params),
+    }
+    
+    data, _ := json.Marshal(resp)
+    dc.Send(data)
+})
+```
+
+### File Transfer
+
+```go
+import "io"
+
+func sendFile(dc *webrtc.DataChannel, filename string) error {
+    file, err := os.Open(filename)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+    
+    // Send file info first
+    info, _ := file.Stat()
+    dc.SendText(fmt.Sprintf("FILE:%s:%d", filename, info.Size()))
+    
+    // Send file in chunks
+    buf := make([]byte, 16384) // 16KB chunks
+    for {
+        n, err := file.Read(buf)
+        if err == io.EOF {
+            break
+        }
+        if err != nil {
+            return err
+        }
+        
+        // Wait if buffer is full
+        for dc.BufferedAmount() > 1024*1024 {
+            time.Sleep(10 * time.Millisecond)
+        }
+        
+        dc.Send(buf[:n])
+    }
+    
+    dc.SendText("EOF")
+    return nil
+}
+```
+
+### Multiplexing Channels
+
+```go
+var (
+    controlChannel *webrtc.DataChannel
+    dataChannel    *webrtc.DataChannel
+)
+
+controlChannel, _ = pc.CreateDataChannel("control", nil)
+dataChannel, _ = pc.CreateDataChannel("data", &webrtc.DataChannelInit{
+    Ordered: false,
+})
+
+controlChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+    // Handle control messages
+    handleControl(string(msg.Data))
+})
+
+dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+    // Handle data
+    processData(msg.Data)
+})
+```
+
+## Performance Tips
+
+<CardGroup cols={2}>
+  <Card title="Message Size" icon="ruler">
+    Keep messages under 16KB for best performance. Larger messages are fragmented.
+  </Card>
+  <Card title="Buffering" icon="buffer">
+    Monitor `BufferedAmount()` to avoid overwhelming the send buffer.
+  </Card>
+  <Card title="Reliability" icon="shield">
+    Use unreliable channels for real-time data where freshness matters more than reliability.
+  </Card>
+  <Card title="Multiple Channels" icon="layer-group">
+    Create separate channels for different data types to avoid head-of-line blocking.
+  </Card>
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="WebRTC Overview" href="/concepts/webrtc-overview">
+    Review core WebRTC concepts
+  </Card>
+  <Card title="ICE & Connectivity" href="/concepts/ice-and-connectivity">
+    Learn about network connectivity
+  </Card>
+</CardGroup>

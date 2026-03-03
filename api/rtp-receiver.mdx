@@ -1,0 +1,388 @@
+---
+title: RTPReceiver
+description: Allows an application to inspect the receipt of a TrackRemote.
+---
+
+## Overview
+
+RTPReceiver allows an application to inspect the receipt of a TrackRemote. It manages inbound RTP streams including demuxing, RTCP feedback, and support for simulcast and RTX.
+
+## Type Definition
+
+```go
+type RTPReceiver struct {
+    kind       RTPCodecType
+    transport  *DTLSTransport
+    tracks     []trackStreams
+    closed     atomic.Bool
+    closedChan chan any
+    received   chan any
+    mu         sync.RWMutex
+    tr         *RTPTransceiver
+    api        *API
+    rtxPool    sync.Pool
+    log        logging.LeveledLogger
+}
+```
+
+## Constructor
+
+### NewRTPReceiver
+
+Constructs a new RTPReceiver.
+
+```go
+func (api *API) NewRTPReceiver(kind RTPCodecType, transport *DTLSTransport) (*RTPReceiver, error)
+```
+
+<ParamField path="kind" type="RTPCodecType" required>
+  The codec type (audio or video)
+</ParamField>
+
+<ParamField path="transport" type="*DTLSTransport" required>
+  The DTLS transport to use for receiving
+</ParamField>
+
+<ResponseField name="receiver" type="*RTPReceiver">
+  The newly created RTPReceiver
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if transport is nil
+</ResponseField>
+
+## Methods
+
+### Transport
+
+Returns the currently-configured DTLSTransport or nil if one has not yet been configured.
+
+```go
+func (r *RTPReceiver) Transport() *DTLSTransport
+```
+
+<ResponseField name="transport" type="*DTLSTransport">
+  The associated DTLS transport
+</ResponseField>
+
+### GetParameters
+
+Describes the current configuration for the encoding and transmission of media on the receiver's track.
+
+```go
+func (r *RTPReceiver) GetParameters() RTPParameters
+```
+
+<ResponseField name="parameters" type="RTPParameters">
+  The current receive parameters including codecs and header extensions
+</ResponseField>
+
+### Track
+
+Returns the RTPReceiver's TrackRemote.
+
+```go
+func (r *RTPReceiver) Track() *TrackRemote
+```
+
+<ResponseField name="track" type="*TrackRemote">
+  The remote track, or nil if there are multiple tracks (simulcast)
+</ResponseField>
+
+<Note>
+For simulcast streams with multiple tracks, use the `Tracks()` method instead.
+</Note>
+
+### Tracks
+
+Returns the RTPReceiver tracks. An RTPReceiver may have multiple tracks to support Simulcast.
+
+```go
+func (r *RTPReceiver) Tracks() []*TrackRemote
+```
+
+<ResponseField name="tracks" type="[]*TrackRemote">
+  All remote tracks associated with this receiver
+</ResponseField>
+
+### RTPTransceiver
+
+Returns the RTPTransceiver this RTPReceiver belongs to, or nil if none.
+
+```go
+func (r *RTPReceiver) RTPTransceiver() *RTPTransceiver
+```
+
+<ResponseField name="transceiver" type="*RTPTransceiver">
+  The associated transceiver
+</ResponseField>
+
+### Receive
+
+Initializes the track and starts all the transports.
+
+```go
+func (r *RTPReceiver) Receive(parameters RTPReceiveParameters) error
+```
+
+<ParamField path="parameters" type="RTPReceiveParameters" required>
+  The receive parameters to configure
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if:
+  - Receive already called
+  - Track stream not found for SSRC
+  - Stream initialization fails
+</ResponseField>
+
+### Read
+
+Reads incoming RTCP for this RTPReceiver.
+
+```go
+func (r *RTPReceiver) Read(b []byte) (n int, a interceptor.Attributes, err error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Buffer to read RTCP data into
+</ParamField>
+
+<ResponseField name="n" type="int">
+  Number of bytes read
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes associated with the packet
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if read fails or receiver is closed
+</ResponseField>
+
+<Warning>
+If the receiver has multiple tracks (simulcast), this method will log an error recommending to use `ReadSimulcast` instead.
+</Warning>
+
+### ReadRTCP
+
+A convenience method that wraps Read and unmarshal for you. It also runs any configured interceptors.
+
+```go
+func (r *RTPReceiver) ReadRTCP() ([]rtcp.Packet, interceptor.Attributes, error)
+```
+
+<ResponseField name="packets" type="[]rtcp.Packet">
+  The unmarshaled RTCP packets
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if read or unmarshal fails
+</ResponseField>
+
+<CodeGroup>
+```go Read RTCP
+for {
+    packets, _, err := receiver.ReadRTCP()
+    if err != nil {
+        return err
+    }
+    
+    for _, packet := range packets {
+        switch p := packet.(type) {
+        case *rtcp.SenderReport:
+            fmt.Printf("Received SR: %+v\n", p)
+        case *rtcp.SourceDescription:
+            fmt.Printf("Received SDES: %+v\n", p)
+        }
+    }
+}
+```
+</CodeGroup>
+
+### ReadSimulcast
+
+Reads incoming RTCP for this RTPReceiver for given RID.
+
+```go
+func (r *RTPReceiver) ReadSimulcast(b []byte, rid string) (n int, a interceptor.Attributes, err error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Buffer to read RTCP data into
+</ParamField>
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier to read RTCP for
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if track stream not found for RID
+</ResponseField>
+
+### ReadSimulcastRTCP
+
+A convenience method that wraps ReadSimulcast and unmarshal for you.
+
+```go
+func (r *RTPReceiver) ReadSimulcastRTCP(rid string) ([]rtcp.Packet, interceptor.Attributes, error)
+```
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier
+</ParamField>
+
+### Stop
+
+Irreversibly stops the RTPReceiver.
+
+```go
+func (r *RTPReceiver) Stop() error
+```
+
+<ResponseField name="error" type="error">
+  Returns error if stopping fails
+</ResponseField>
+
+<Note>
+Stopping a receiver closes all associated RTP and RTCP streams and unbinds all interceptors.
+</Note>
+
+### SetReadDeadline
+
+Sets the max amount of time the RTCP stream will block before returning. 0 is forever.
+
+```go
+func (r *RTPReceiver) SetReadDeadline(t time.Time) error
+```
+
+<ParamField path="t" type="time.Time" required>
+  The deadline time. Zero value means no deadline.
+</ParamField>
+
+### SetReadDeadlineSimulcast
+
+Sets the max amount of time the RTCP stream for a given RID will block before returning. 0 is forever.
+
+```go
+func (r *RTPReceiver) SetReadDeadlineSimulcast(deadline time.Time, rid string) error
+```
+
+<ParamField path="deadline" type="time.Time" required>
+  The deadline time
+</ParamField>
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if track stream not found for RID
+</ResponseField>
+
+## Usage Examples
+
+### Handling Incoming Tracks
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    fmt.Printf("Track has started, of type %d: %s\n", track.PayloadType(), track.Codec().MimeType)
+    
+    // Read RTP packets
+    for {
+        pkt, _, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        // Process RTP packet
+        fmt.Printf("Received RTP packet: %d bytes\n", len(pkt.Payload))
+    }
+})
+```
+
+### Reading RTCP Feedback
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    // Read RTCP packets in separate goroutine
+    go func() {
+        for {
+            packets, _, err := receiver.ReadRTCP()
+            if err != nil {
+                return
+            }
+            
+            for _, pkt := range packets {
+                switch p := pkt.(type) {
+                case *rtcp.SenderReport:
+                    fmt.Printf("SR SSRC: %d, NTP: %d\n", p.SSRC, p.NTPTime)
+                }
+            }
+        }
+    }()
+})
+```
+
+### Handling Simulcast Tracks
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    // Get all tracks (for simulcast)
+    tracks := receiver.Tracks()
+    fmt.Printf("Receiver has %d tracks\n", len(tracks))
+    
+    for _, t := range tracks {
+        rid := t.RID()
+        fmt.Printf("Track RID: %s, SSRC: %d\n", rid, t.SSRC())
+        
+        // Read RTCP for specific RID
+        go func(r string) {
+            for {
+                packets, _, err := receiver.ReadSimulcastRTCP(r)
+                if err != nil {
+                    return
+                }
+                
+                // Handle RTCP for this specific simulcast layer
+                for _, pkt := range packets {
+                    fmt.Printf("RTCP for RID %s: %T\n", r, pkt)
+                }
+            }
+        }(rid)
+    }
+})
+```
+
+### Using RTX (Retransmission)
+
+```go
+peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    if track.HasRTX() {
+        fmt.Printf("Track has RTX support, RTX SSRC: %d\n", track.RtxSSRC())
+    }
+    
+    // RTX packets are automatically handled and merged into the main stream
+    for {
+        pkt, attributes, err := track.ReadRTP()
+        if err != nil {
+            return
+        }
+        
+        // Check if packet was received via RTX
+        if rtxSsrc, ok := attributes.Get(webrtc.AttributeRtxSsrc).(uint32); ok {
+            fmt.Printf("Packet received via RTX from SSRC %d\n", rtxSsrc)
+        }
+    }
+})
+```
+
+## See Also
+
+- [RTPSender](/api/rtp-sender) - Manages outbound RTP streams
+- [RTPTransceiver](/api/rtp-transceiver) - Combines sender and receiver
+- [TrackRemote](/api/track-remote) - Remote media track

@@ -1,0 +1,1125 @@
+---
+title: "Stats"
+description: "WebRTC statistics and metrics collection for monitoring connections, streams, and transport"
+---
+
+## Overview
+
+The stats package provides comprehensive statistics collection for WebRTC connections. It implements the WebRTC Statistics API, allowing you to monitor and measure various aspects of peer connections, RTP streams, ICE candidates, transports, and more.
+
+## Core Types
+
+### Stats Interface
+
+The base interface for all statistics objects.
+
+```go
+type Stats interface {
+    statsMarker()
+}
+```
+
+All statistics types implement this interface to identify them as valid stats objects.
+
+### StatsReport
+
+A collection of stats objects indexed by their unique identifiers.
+
+```go
+type StatsReport map[string]Stats
+```
+
+**Usage Example**
+
+```go
+pc, _ := webrtc.NewPeerConnection(webrtc.Configuration{})
+
+// Get statistics report
+stats := pc.GetStats()
+
+// Iterate through all stats
+for id, stat := range stats {
+    switch s := stat.(type) {
+    case webrtc.InboundRTPStreamStats:
+        fmt.Printf("Inbound RTP: %d packets received\n", s.PacketsReceived)
+    case webrtc.ICECandidatePairStats:
+        fmt.Printf("Candidate pair: %s\n", s.State)
+    }
+}
+```
+
+### StatsTimestamp
+
+A timestamp represented as floating point milliseconds since epoch.
+
+```go
+type StatsTimestamp float64
+```
+
+<ParamField path="Time()" type="time.Time">
+  Converts the timestamp to a Go time.Time value
+</ParamField>
+
+**Example**
+
+```go
+timestamp := stats.Timestamp
+t := timestamp.Time()
+fmt.Printf("Stats captured at: %s\n", t.Format(time.RFC3339))
+```
+
+## Statistics Types
+
+### StatsType
+
+Indicates the type of statistics object.
+
+```go
+type StatsType string
+```
+
+**Constants**
+
+<ResponseField name="StatsTypeCodec" type="string">
+  Used by CodecStats ("codec")
+</ResponseField>
+
+<ResponseField name="StatsTypeInboundRTP" type="string">
+  Used by InboundRTPStreamStats ("inbound-rtp")
+</ResponseField>
+
+<ResponseField name="StatsTypeOutboundRTP" type="string">
+  Used by OutboundRTPStreamStats ("outbound-rtp")
+</ResponseField>
+
+<ResponseField name="StatsTypeRemoteInboundRTP" type="string">
+  Used by RemoteInboundRTPStreamStats ("remote-inbound-rtp")
+</ResponseField>
+
+<ResponseField name="StatsTypeRemoteOutboundRTP" type="string">
+  Used by RemoteOutboundRTPStreamStats ("remote-outbound-rtp")
+</ResponseField>
+
+<ResponseField name="StatsTypeCSRC" type="string">
+  Used by RTPContributingSourceStats ("csrc")
+</ResponseField>
+
+<ResponseField name="StatsTypeMediaSource" type="string">
+  Used by AudioSourceStats or VideoSourceStats ("media-source")
+</ResponseField>
+
+<ResponseField name="StatsTypeMediaPlayout" type="string">
+  Used by AudioPlayoutStats ("media-playout")
+</ResponseField>
+
+<ResponseField name="StatsTypePeerConnection" type="string">
+  Used by PeerConnectionStats ("peer-connection")
+</ResponseField>
+
+<ResponseField name="StatsTypeDataChannel" type="string">
+  Used by DataChannelStats ("data-channel")
+</ResponseField>
+
+<ResponseField name="StatsTypeTransport" type="string">
+  Used by TransportStats ("transport")
+</ResponseField>
+
+<ResponseField name="StatsTypeCandidatePair" type="string">
+  Used by ICECandidatePairStats ("candidate-pair")
+</ResponseField>
+
+<ResponseField name="StatsTypeLocalCandidate" type="string">
+  Used by ICECandidateStats for local candidates ("local-candidate")
+</ResponseField>
+
+<ResponseField name="StatsTypeRemoteCandidate" type="string">
+  Used by ICECandidateStats for remote candidates ("remote-candidate")
+</ResponseField>
+
+<ResponseField name="StatsTypeCertificate" type="string">
+  Used by CertificateStats ("certificate")
+</ResponseField>
+
+<ResponseField name="StatsTypeSCTPTransport" type="string">
+  Used by SCTPTransportStats ("sctp-transport")
+</ResponseField>
+
+## RTP Stream Statistics
+
+### InboundRTPStreamStats
+
+Statistics for an inbound RTP stream currently being received.
+
+```go
+type InboundRTPStreamStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    SSRC                 SSRC
+    Kind                 string
+    Mid                  string
+    
+    // Transport and codec
+    TransportID          string
+    CodecID              string
+    
+    // Packet metrics
+    PacketsReceived      uint32
+    PacketsLost          int32
+    PacketsDiscarded     uint32
+    PacketsRepaired      uint32
+    PacketsDuplicated    uint32
+    PacketsFailedDecryption uint32
+    
+    // Byte metrics
+    BytesReceived        uint64
+    HeaderBytesReceived  uint64
+    
+    // Quality metrics
+    Jitter               float64
+    
+    // RTCP feedback
+    FIRCount             uint32
+    PLICount             uint32
+    NACKCount            uint32
+    SLICount             uint32
+    
+    // Jitter buffer
+    JitterBufferDelay           float64
+    JitterBufferTargetDelay     float64
+    JitterBufferEmittedCount    uint64
+    JitterBufferMinimumDelay    float64
+    
+    // Video-specific (when Kind == "video")
+    FramesReceived              uint32
+    FramesDecoded               uint32
+    KeyFramesDecoded            uint32
+    FramesRendered              uint32
+    FramesDropped               uint32
+    FrameWidth                  uint32
+    FrameHeight                 uint32
+    TotalDecodeTime             float64
+    TotalInterFrameDelay        float64
+    TotalSquaredInterFrameDelay float64
+    QPSum                       uint64
+    PauseCount                  uint32
+    TotalPausesDuration         float64
+    FreezeCount                 uint32
+    TotalFreezesDuration        float64
+    PowerEfficientDecoder       bool
+    DecoderImplementation       string
+    
+    // Audio-specific (when Kind == "audio")
+    TotalSamplesReceived           uint64
+    ConcealedSamples               uint64
+    SilentConcealedSamples         uint64
+    ConcealmentEvents              uint64
+    InsertedSamplesForDeceleration uint64
+    RemovedSamplesForAcceleration  uint64
+    AudioLevel                     float64
+    TotalAudioEnergy               float64
+    TotalSamplesDuration           float64
+    
+    // Processing
+    TotalProcessingDelay        float64
+    
+    // Burst and gap metrics
+    BurstPacketsLost       uint32
+    BurstPacketsDiscarded  uint32
+    BurstLossCount         uint32
+    BurstDiscardCount      uint32
+    BurstLossRate          float64
+    BurstDiscardRate       float64
+    GapLossRate            float64
+    GapDiscardRate         float64
+    
+    // FEC
+    FECPacketsReceived     uint32
+    FECPacketsDiscarded    uint64
+    
+    // References
+    TrackID                     string
+    ReceiverID                  string
+    RemoteID                    string
+    
+    // Timing
+    LastPacketReceivedTimestamp StatsTimestamp
+    AverageRTCPInterval         float64
+    
+    // DSCP
+    PerDSCPPacketsReceived map[string]uint32
+}
+```
+
+<CodeGroup>
+```go Monitoring Inbound Video Quality
+stats := pc.GetStats()
+for _, stat := range stats {
+    if inbound, ok := stat.(webrtc.InboundRTPStreamStats); ok && inbound.Kind == "video" {
+        fmt.Printf("Video Stats:\n")
+        fmt.Printf("  Packets: %d received, %d lost\n", 
+            inbound.PacketsReceived, inbound.PacketsLost)
+        fmt.Printf("  Frames: %d decoded, %d dropped\n",
+            inbound.FramesDecoded, inbound.FramesDropped)
+        fmt.Printf("  Resolution: %dx%d\n",
+            inbound.FrameWidth, inbound.FrameHeight)
+        fmt.Printf("  Jitter: %.3f seconds\n", inbound.Jitter)
+        
+        // Calculate packet loss rate
+        total := uint32(int32(inbound.PacketsReceived) + inbound.PacketsLost)
+        if total > 0 {
+            lossRate := float64(inbound.PacketsLost) / float64(total) * 100
+            fmt.Printf("  Loss Rate: %.2f%%\n", lossRate)
+        }
+    }
+}
+```
+
+```go Monitoring Audio Quality
+stats := pc.GetStats()
+for _, stat := range stats {
+    if inbound, ok := stat.(webrtc.InboundRTPStreamStats); ok && inbound.Kind == "audio" {
+        fmt.Printf("Audio Stats:\n")
+        fmt.Printf("  Packets: %d received, %d lost\n",
+            inbound.PacketsReceived, inbound.PacketsLost)
+        fmt.Printf("  Audio Level: %.2f\n", inbound.AudioLevel)
+        fmt.Printf("  Concealed Samples: %d\n", inbound.ConcealedSamples)
+        
+        // Calculate jitter buffer delay
+        if inbound.JitterBufferEmittedCount > 0 {
+            avgDelay := inbound.JitterBufferDelay / float64(inbound.JitterBufferEmittedCount)
+            fmt.Printf("  Avg Jitter Buffer Delay: %.3f ms\n", avgDelay * 1000)
+        }
+    }
+}
+```
+</CodeGroup>
+
+### OutboundRTPStreamStats
+
+Statistics for an outbound RTP stream currently being sent.
+
+```go
+type OutboundRTPStreamStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    SSRC                 SSRC
+    Kind                 string
+    Mid                  string
+    Rid                  string
+    
+    // Transport and codec
+    TransportID          string
+    CodecID              string
+    MediaSourceID        string
+    
+    // Packet metrics
+    PacketsSent                uint32
+    PacketsDiscardedOnSend     uint32
+    RetransmittedPacketsSent   uint64
+    
+    // Byte metrics
+    BytesSent                  uint64
+    HeaderBytesSent            uint64
+    RetransmittedBytesSent     uint64
+    BytesDiscardedOnSend       uint64
+    
+    // RTCP feedback
+    FIRCount             uint32
+    PLICount             uint32
+    NACKCount            uint32
+    SLICount             uint32
+    
+    // Video-specific (when Kind == "video")
+    FramesSent                         uint32
+    HugeFramesSent                     uint32
+    FramesEncoded                      uint32
+    KeyFramesEncoded                   uint32
+    FrameWidth                         uint32
+    FrameHeight                        uint32
+    FramesPerSecond                    float64
+    QPSum                              uint64
+    TotalEncodeTime                    float64
+    QualityLimitationReason            QualityLimitationReason
+    QualityLimitationDurations         map[string]float64
+    QualityLimitationResolutionChanges uint32
+    PowerEfficientEncoder              bool
+    EncoderImplementation              string
+    ScalabilityMode                    string
+    
+    // Bitrate
+    TargetBitrate           float64
+    TotalEncodedBytesTarget uint64
+    
+    // Timing
+    TotalPacketSendDelay        float64
+    LastPacketSentTimestamp     StatsTimestamp
+    AverageRTCPInterval         float64
+    
+    // FEC
+    FECPacketsSent     uint32
+    
+    // References
+    TrackID            string
+    SenderID           string
+    RemoteID           string
+    
+    // State
+    Active             bool
+    
+    // DSCP
+    PerDSCPPacketsSent map[string]uint32
+}
+```
+
+<Expandable title="QualityLimitationReason">
+Indicates why video resolution/framerate is limited:
+
+- `QualityLimitationReasonNone` - Not limited
+- `QualityLimitationReasonCPU` - Limited due to CPU load
+- `QualityLimitationReasonBandwidth` - Limited due to bandwidth
+- `QualityLimitationReasonOther` - Limited for other reasons
+</Expandable>
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if outbound, ok := stat.(webrtc.OutboundRTPStreamStats); ok && outbound.Kind == "video" {
+        fmt.Printf("Outbound Video Stats:\n")
+        fmt.Printf("  Packets sent: %d\n", outbound.PacketsSent)
+        fmt.Printf("  Frames encoded: %d (key frames: %d)\n",
+            outbound.FramesEncoded, outbound.KeyFramesEncoded)
+        fmt.Printf("  Target bitrate: %.0f bps\n", outbound.TargetBitrate)
+        fmt.Printf("  Quality limitation: %s\n", outbound.QualityLimitationReason)
+        
+        // Calculate average encode time
+        if outbound.FramesEncoded > 0 {
+            avgEncodeTime := outbound.TotalEncodeTime / float64(outbound.FramesEncoded)
+            fmt.Printf("  Avg encode time: %.2f ms\n", avgEncodeTime * 1000)
+        }
+    }
+}
+```
+
+### RemoteInboundRTPStreamStats
+
+Statistics for the remote endpoint's inbound RTP stream, measured at the remote endpoint and reported via RTCP.
+
+```go
+type RemoteInboundRTPStreamStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    SSRC                 SSRC
+    Kind                 string
+    TransportID          string
+    CodecID              string
+    
+    // Packet metrics
+    PacketsReceived      uint32
+    PacketsLost          int32
+    PacketsDiscarded     uint32
+    PacketsRepaired      uint32
+    
+    // Quality metrics
+    Jitter               float64
+    
+    // RTCP feedback
+    FIRCount             uint32
+    PLICount             uint32
+    NACKCount            uint32
+    SLICount             uint32
+    QPSum                uint64
+    
+    // Burst and gap metrics
+    BurstPacketsLost       uint32
+    BurstPacketsDiscarded  uint32
+    BurstLossCount         uint32
+    BurstDiscardCount      uint32
+    BurstLossRate          float64
+    BurstDiscardRate       float64
+    GapLossRate            float64
+    GapDiscardRate         float64
+    
+    // Round trip time
+    RoundTripTime              float64
+    TotalRoundTripTime         float64
+    FractionLost               float64
+    RoundTripTimeMeasurements  uint64
+    
+    // Reference
+    LocalID              string
+}
+```
+
+### RemoteOutboundRTPStreamStats
+
+Statistics for the remote endpoint's outbound RTP stream, measured at the remote endpoint and reported via RTCP.
+
+```go
+type RemoteOutboundRTPStreamStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    SSRC                 SSRC
+    Kind                 string
+    TransportID          string
+    CodecID              string
+    
+    // Packet metrics
+    PacketsSent             uint32
+    PacketsDiscardedOnSend  uint32
+    FECPacketsSent          uint32
+    
+    // Byte metrics
+    BytesSent               uint64
+    BytesDiscardedOnSend    uint64
+    
+    // RTCP feedback
+    FIRCount             uint32
+    PLICount             uint32
+    NACKCount            uint32
+    SLICount             uint32
+    QPSum                uint64
+    
+    // Round trip time
+    RoundTripTime              float64
+    TotalRoundTripTime         float64
+    RoundTripTimeMeasurements  uint64
+    
+    // References
+    LocalID             string
+    RemoteTimestamp     StatsTimestamp
+    ReportsSent         uint64
+}
+```
+
+## Codec Statistics
+
+### CodecStats
+
+Statistics for a codec currently being used by RTP streams.
+
+```go
+type CodecStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    
+    PayloadType          PayloadType
+    CodecType            CodecType
+    TransportID          string
+    MimeType             string
+    ClockRate            uint32
+    Channels             uint8
+    SDPFmtpLine          string
+    Implementation       string
+}
+```
+
+<ResponseField name="CodecType" type="string">
+  Either `CodecTypeEncode` or `CodecTypeDecode`
+</ResponseField>
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if codec, ok := stat.(webrtc.CodecStats); ok {
+        fmt.Printf("Codec: %s\n", codec.MimeType)
+        fmt.Printf("  Payload Type: %d\n", codec.PayloadType)
+        fmt.Printf("  Clock Rate: %d Hz\n", codec.ClockRate)
+        fmt.Printf("  Type: %s\n", codec.CodecType)
+        if codec.Channels > 0 {
+            fmt.Printf("  Channels: %d\n", codec.Channels)
+        }
+    }
+}
+```
+
+## Media Source Statistics
+
+### AudioSourceStats
+
+Statistics for an audio track attached to sender(s).
+
+```go
+type AudioSourceStats struct {
+    Timestamp                  StatsTimestamp
+    Type                       StatsType
+    ID                         string
+    TrackIdentifier            string
+    Kind                       string
+    
+    AudioLevel                 float64
+    TotalAudioEnergy           float64
+    TotalSamplesDuration       float64
+    EchoReturnLoss             float64
+    EchoReturnLossEnhancement  float64
+    DroppedSamplesDuration     float64
+    DroppedSamplesEvents       uint64
+    TotalCaptureDelay          float64
+    TotalSamplesCaptured       uint64
+}
+```
+
+### VideoSourceStats
+
+Statistics for a video track attached to sender(s).
+
+```go
+type VideoSourceStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    TrackIdentifier      string
+    Kind                 string
+    
+    Width                uint32
+    Height               uint32
+    Frames               uint32
+    FramesPerSecond      float64
+}
+```
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    switch source := stat.(type) {
+    case webrtc.AudioSourceStats:
+        fmt.Printf("Audio Source: %s\n", source.TrackIdentifier)
+        fmt.Printf("  Audio Level: %.2f\n", source.AudioLevel)
+        fmt.Printf("  Samples Captured: %d\n", source.TotalSamplesCaptured)
+        
+    case webrtc.VideoSourceStats:
+        fmt.Printf("Video Source: %s\n", source.TrackIdentifier)
+        fmt.Printf("  Resolution: %dx%d\n", source.Width, source.Height)
+        fmt.Printf("  FPS: %.1f\n", source.FramesPerSecond)
+    }
+}
+```
+
+## ICE Statistics
+
+### ICECandidatePairStats
+
+Statistics for an ICE candidate pair.
+
+```go
+type ICECandidatePairStats struct {
+    Timestamp                       StatsTimestamp
+    Type                            StatsType
+    ID                              string
+    TransportID                     string
+    LocalCandidateID                string
+    RemoteCandidateID               string
+    
+    State                           StatsICECandidatePairState
+    Nominated                       bool
+    
+    // Packet metrics
+    PacketsSent                     uint32
+    PacketsReceived                 uint32
+    PacketsDiscardedOnSend          uint32
+    
+    // Byte metrics
+    BytesSent                       uint64
+    BytesReceived                   uint64
+    BytesDiscardedOnSend            uint32
+    
+    // Timing
+    LastPacketSentTimestamp         StatsTimestamp
+    LastPacketReceivedTimestamp     StatsTimestamp
+    FirstRequestTimestamp           StatsTimestamp
+    LastRequestTimestamp            StatsTimestamp
+    FirstResponseTimestamp          StatsTimestamp
+    LastResponseTimestamp           StatsTimestamp
+    FirstRequestReceivedTimestamp   StatsTimestamp
+    LastRequestReceivedTimestamp    StatsTimestamp
+    
+    // Round trip time
+    TotalRoundTripTime              float64
+    CurrentRoundTripTime            float64
+    
+    // Bandwidth
+    AvailableOutgoingBitrate        float64
+    AvailableIncomingBitrate        float64
+    
+    // STUN metrics
+    RequestsReceived                uint64
+    RequestsSent                    uint64
+    ResponsesReceived               uint64
+    ResponsesSent                   uint64
+    RetransmissionsReceived         uint64
+    RetransmissionsSent             uint64
+    ConsentRequestsSent             uint64
+    ConsentExpiredTimestamp         StatsTimestamp
+    
+    // Circuit breaker
+    CircuitBreakerTriggerCount      uint32
+}
+```
+
+<Expandable title="StatsICECandidatePairState Values">
+- `StatsICECandidatePairStateFrozen` - Check hasn't been performed yet
+- `StatsICECandidatePairStateWaiting` - Waiting to perform check
+- `StatsICECandidatePairStateInProgress` - Check in progress
+- `StatsICECandidatePairStateFailed` - Check failed
+- `StatsICECandidatePairStateSucceeded` - Check succeeded
+</Expandable>
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if pair, ok := stat.(webrtc.ICECandidatePairStats); ok && pair.Nominated {
+        fmt.Printf("Active Candidate Pair:\n")
+        fmt.Printf("  State: %s\n", pair.State)
+        fmt.Printf("  RTT: %.3f ms\n", pair.CurrentRoundTripTime * 1000)
+        fmt.Printf("  Bytes sent: %d, received: %d\n",
+            pair.BytesSent, pair.BytesReceived)
+        fmt.Printf("  Available bitrate: out=%.0f, in=%.0f bps\n",
+            pair.AvailableOutgoingBitrate, pair.AvailableIncomingBitrate)
+    }
+}
+```
+
+### ICECandidateStats
+
+Statistics for an ICE candidate.
+
+```go
+type ICECandidateStats struct {
+    Timestamp            StatsTimestamp
+    Type                 StatsType
+    ID                   string
+    TransportID          string
+    
+    NetworkType          string  // Deprecated
+    IP                   string
+    Port                 int32
+    Protocol             string
+    CandidateType        ICECandidateType
+    Priority             int32
+    URL                  string
+    RelayProtocol        string
+    Deleted              bool
+}
+```
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if candidate, ok := stat.(webrtc.ICECandidateStats); ok {
+        fmt.Printf("Candidate %s:\n", candidate.ID)
+        fmt.Printf("  Type: %s\n", candidate.CandidateType)
+        fmt.Printf("  Address: %s:%d\n", candidate.IP, candidate.Port)
+        fmt.Printf("  Protocol: %s\n", candidate.Protocol)
+        if candidate.RelayProtocol != "" {
+            fmt.Printf("  Relay Protocol: %s\n", candidate.RelayProtocol)
+        }
+    }
+}
+```
+
+## Transport Statistics
+
+### TransportStats
+
+Statistics for the ICE/DTLS transport.
+
+```go
+type TransportStats struct {
+    Timestamp                StatsTimestamp
+    Type                     StatsType
+    ID                       string
+    
+    PacketsSent              uint32
+    PacketsReceived          uint32
+    BytesSent                uint64
+    BytesReceived            uint64
+    
+    RTCPTransportStatsID     string
+    ICERole                  ICERole
+    DTLSState                DTLSTransportState
+    ICEState                 ICETransportState
+    SelectedCandidatePairID  string
+    LocalCertificateID       string
+    RemoteCertificateID      string
+    DTLSCipher               string
+    SRTPCipher               string
+}
+```
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if transport, ok := stat.(webrtc.TransportStats); ok {
+        fmt.Printf("Transport:\n")
+        fmt.Printf("  ICE State: %s\n", transport.ICEState)
+        fmt.Printf("  DTLS State: %s\n", transport.DTLSState)
+        fmt.Printf("  DTLS Cipher: %s\n", transport.DTLSCipher)
+        fmt.Printf("  SRTP Cipher: %s\n", transport.SRTPCipher)
+        fmt.Printf("  Total bytes: sent=%d, received=%d\n",
+            transport.BytesSent, transport.BytesReceived)
+    }
+}
+```
+
+### CertificateStats
+
+Statistics for a certificate used by an ICE transport.
+
+```go
+type CertificateStats struct {
+    Timestamp               StatsTimestamp
+    Type                    StatsType
+    ID                      string
+    
+    Fingerprint             string
+    FingerprintAlgorithm    string
+    Base64Certificate       string
+    IssuerCertificateID     string
+}
+```
+
+## Data Channel Statistics
+
+### DataChannelStats
+
+Statistics for a data channel.
+
+```go
+type DataChannelStats struct {
+    Timestamp               StatsTimestamp
+    Type                    StatsType
+    ID                      string
+    
+    Label                   string
+    Protocol                string
+    DataChannelIdentifier   int32
+    TransportID             string
+    State                   DataChannelState
+    
+    MessagesSent            uint32
+    BytesSent               uint64
+    MessagesReceived        uint32
+    BytesReceived           uint64
+}
+```
+
+**Example**
+
+```go
+stats := pc.GetStats()
+for _, stat := range stats {
+    if dc, ok := stat.(webrtc.DataChannelStats); ok {
+        fmt.Printf("DataChannel '%s':\n", dc.Label)
+        fmt.Printf("  State: %s\n", dc.State)
+        fmt.Printf("  Messages: sent=%d, received=%d\n",
+            dc.MessagesSent, dc.MessagesReceived)
+        fmt.Printf("  Bytes: sent=%d, received=%d\n",
+            dc.BytesSent, dc.BytesReceived)
+    }
+}
+```
+
+### SCTPTransportStats
+
+Statistics for the SCTP transport used by data channels.
+
+```go
+type SCTPTransportStats struct {
+    Timestamp               StatsTimestamp
+    Type                    StatsType
+    ID                      string
+    TransportID             string
+    
+    SmoothedRoundTripTime   float64
+    CongestionWindow        uint32
+    ReceiverWindow          uint32
+    MTU                     uint32
+    UNACKData               uint32
+    BytesSent               uint64
+    BytesReceived           uint64
+}
+```
+
+## PeerConnection Statistics
+
+### PeerConnectionStats
+
+Statistics for the overall peer connection.
+
+```go
+type PeerConnectionStats struct {
+    Timestamp               StatsTimestamp
+    Type                    StatsType
+    ID                      string
+    
+    DataChannelsOpened      uint32
+    DataChannelsClosed      uint32
+    DataChannelsRequested   uint32
+    DataChannelsAccepted    uint32
+}
+```
+
+## Additional Statistics Types
+
+### AudioPlayoutStats
+
+Statistics for audio playout path.
+
+```go
+type AudioPlayoutStats struct {
+    Timestamp                   StatsTimestamp
+    Type                        StatsType
+    ID                          string
+    Kind                        string
+    
+    SynthesizedSamplesDuration  float64
+    SynthesizedSamplesEvents    uint64
+    TotalSamplesDuration        float64
+    TotalPlayoutDelay           float64
+    TotalSamplesCount           uint64
+}
+```
+
+### RTPContributingSourceStats
+
+Statistics for a contributing source (CSRC).
+
+```go
+type RTPContributingSourceStats struct {
+    Timestamp              StatsTimestamp
+    Type                   StatsType
+    ID                     string
+    
+    ContributorSSRC        SSRC
+    InboundRTPStreamID     string
+    PacketsContributedTo   uint32
+    AudioLevel             float64
+}
+```
+
+### Sender and Receiver Statistics
+
+<CodeGroup>
+```go AudioSenderStats
+type AudioSenderStats struct {
+    Timestamp                   StatsTimestamp
+    Type                        StatsType
+    ID                          string
+    TrackIdentifier             string
+    RemoteSource                bool
+    Ended                       bool
+    Kind                        string
+    
+    AudioLevel                  float64
+    TotalAudioEnergy            float64
+    VoiceActivityFlag           bool
+    TotalSamplesDuration        float64
+    EchoReturnLoss              float64
+    EchoReturnLossEnhancement   float64
+    TotalSamplesSent            uint64
+}
+```
+
+```go VideoSenderStats
+type VideoSenderStats struct {
+    Timestamp          StatsTimestamp
+    Type               StatsType
+    ID                 string
+    Kind               string
+    
+    FramesCaptured     uint32
+    FramesSent         uint32
+    HugeFramesSent     uint32
+    KeyFramesSent      uint32
+}
+```
+
+```go AudioReceiverStats
+type AudioReceiverStats struct {
+    Timestamp                     StatsTimestamp
+    Type                          StatsType
+    ID                            string
+    Kind                          string
+    
+    AudioLevel                    float64
+    TotalAudioEnergy              float64
+    VoiceActivityFlag             bool
+    TotalSamplesDuration          float64
+    EstimatedPlayoutTimestamp     StatsTimestamp
+    JitterBufferDelay             float64
+    JitterBufferEmittedCount      uint64
+    TotalSamplesReceived          uint64
+    ConcealedSamples              uint64
+    ConcealmentEvents             uint64
+}
+```
+
+```go VideoReceiverStats
+type VideoReceiverStats struct {
+    Timestamp                     StatsTimestamp
+    Type                          StatsType
+    ID                            string
+    Kind                          string
+    
+    FrameWidth                    uint32
+    FrameHeight                   uint32
+    FramesPerSecond               float64
+    EstimatedPlayoutTimestamp     StatsTimestamp
+    JitterBufferDelay             float64
+    JitterBufferEmittedCount      uint64
+    FramesReceived                uint32
+    KeyFramesReceived             uint32
+    FramesDecoded                 uint32
+    FramesDropped                 uint32
+    PartialFramesLost             uint32
+    FullFramesLost                uint32
+}
+```
+</CodeGroup>
+
+## Utility Functions
+
+### UnmarshalStatsJSON
+
+Unmarshals a Stats object from JSON.
+
+```go
+func UnmarshalStatsJSON(b []byte) (Stats, error)
+```
+
+**Parameters**
+
+<ParamField path="b" type="[]byte" required>
+  JSON-encoded statistics object
+</ParamField>
+
+**Returns**
+
+<ResponseField name="Stats" type="Stats">
+  The unmarshaled statistics object (specific type based on the "type" field)
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if unmarshaling fails or type is unknown
+</ResponseField>
+
+**Example**
+
+```go
+jsonData := []byte(`{
+    "type": "inbound-rtp",
+    "id": "RTCInboundRTPVideoStream_12345",
+    "timestamp": 1234567890.0,
+    "ssrc": 12345,
+    "kind": "video",
+    "packetsReceived": 1000,
+    "bytesReceived": 500000
+}`)
+
+stat, err := webrtc.UnmarshalStatsJSON(jsonData)
+if err != nil {
+    log.Fatal(err)
+}
+
+if inbound, ok := stat.(webrtc.InboundRTPStreamStats); ok {
+    fmt.Printf("Received %d packets\n", inbound.PacketsReceived)
+}
+```
+
+## Common Patterns
+
+### Monitoring Connection Quality
+
+```go
+func monitorConnectionQuality(pc *webrtc.PeerConnection) {
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        stats := pc.GetStats()
+        
+        // Find active candidate pair
+        for _, stat := range stats {
+            if pair, ok := stat.(webrtc.ICECandidatePairStats); ok && pair.Nominated {
+                fmt.Printf("RTT: %.0f ms, Bitrate: %.0f kbps\n",
+                    pair.CurrentRoundTripTime * 1000,
+                    pair.AvailableOutgoingBitrate / 1000)
+            }
+        }
+        
+        // Check video quality
+        for _, stat := range stats {
+            if inbound, ok := stat.(webrtc.InboundRTPStreamStats); ok && inbound.Kind == "video" {
+                if inbound.PacketsReceived > 0 {
+                    total := uint32(int32(inbound.PacketsReceived) + inbound.PacketsLost)
+                    lossRate := float64(inbound.PacketsLost) / float64(total) * 100
+                    fmt.Printf("Video Loss Rate: %.2f%%\n", lossRate)
+                }
+            }
+        }
+    }
+}
+```
+
+### Exporting Stats to JSON
+
+```go
+func exportStats(pc *webrtc.PeerConnection) ([]byte, error) {
+    stats := pc.GetStats()
+    return json.MarshalIndent(stats, "", "  ")
+}
+```
+
+### Calculating Bitrates
+
+```go
+type BitrateCalculator struct {
+    lastStats     webrtc.InboundRTPStreamStats
+    lastTimestamp time.Time
+}
+
+func (bc *BitrateCalculator) Calculate(current webrtc.InboundRTPStreamStats) float64 {
+    now := current.Timestamp.Time()
+    
+    if bc.lastTimestamp.IsZero() {
+        bc.lastStats = current
+        bc.lastTimestamp = now
+        return 0
+    }
+    
+    deltaBytes := current.BytesReceived - bc.lastStats.BytesReceived
+    deltaTime := now.Sub(bc.lastTimestamp).Seconds()
+    
+    bc.lastStats = current
+    bc.lastTimestamp = now
+    
+    if deltaTime > 0 {
+        return float64(deltaBytes) * 8 / deltaTime // bits per second
+    }
+    
+    return 0
+}
+```
+
+## See Also
+
+- [PeerConnection](/api/peer-connection) - Main interface for WebRTC connections
+- [RTPReceiver](/api/rtp-receiver) - Receiving RTP streams
+- [RTPSender](/api/rtp-sender) - Sending RTP streams
+- [ICETransport](/api/ice-transport) - ICE transport layer

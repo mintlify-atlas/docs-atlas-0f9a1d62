@@ -1,0 +1,498 @@
+---
+title: 'SettingEngine'
+description: 'Configure advanced WebRTC behavior beyond the standard API'
+---
+
+## Overview
+
+The `SettingEngine` allows you to influence WebRTC behavior in ways that are not supported by the standard WebRTC API. This enables advanced use cases like custom network configurations, DTLS tuning, and ICE optimization without deviating from the WebRTC API elsewhere.
+
+<Note>
+  The SettingEngine must be configured before creating a PeerConnection. Settings are applied when you create an API object with `webrtc.NewAPI(webrtc.WithSettingEngine(s))`.
+</Note>
+
+## Creating a Custom API
+
+```go settingengine.go
+package main
+
+import "github.com/pion/webrtc/v4"
+
+func main() {
+    // Create a SettingEngine
+    s := webrtc.SettingEngine{}
+    
+    // Configure settings (examples below)
+    s.SetEphemeralUDPPortRange(10000, 20000)
+    
+    // Create an API with the SettingEngine
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    
+    // Use the API to create PeerConnections
+    peerConnection, err := api.NewPeerConnection(webrtc.Configuration{})
+}
+```
+
+## ICE Configuration
+
+### Port Range
+
+Limit the UDP port range for ICE candidate gathering:
+
+```go port-range.go
+s := webrtc.SettingEngine{}
+
+// Limit ICE to ports 10000-20000
+err := s.SetEphemeralUDPPortRange(10000, 20000)
+if err != nil {
+    panic(err)
+}
+```
+
+From [settingengine.go:264-279](https://github.com/pion/webrtc/blob/master/settingengine.go:264-279).
+
+### ICE Timeouts
+
+Configure ICE connection timeouts and keepalive intervals:
+
+```go ice-timeouts.go
+import "time"
+
+s := webrtc.SettingEngine{}
+
+// disconnectedTimeout: Duration without activity before disconnected (default: 5s)
+// failedTimeout: Duration without activity before failed (default: 25s)  
+// keepAliveInterval: How often to send keepalive traffic (default: 2s)
+s.SetICETimeouts(
+    5*time.Second,  // disconnected timeout
+    25*time.Second, // failed timeout
+    2*time.Second,  // keepalive interval
+)
+```
+
+### Network Types
+
+Control which network types are used for ICE candidates:
+
+```go network-types.go
+s := webrtc.SettingEngine{}
+
+// Only use UDP networks
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeUDP4,
+    webrtc.NetworkTypeUDP6,
+})
+
+// Only use TCP networks
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeTCP4,
+    webrtc.NetworkTypeTCP6,
+})
+```
+
+### Interface and IP Filtering
+
+Filter which network interfaces and IP addresses are used:
+
+```go filtering.go
+import "net"
+
+s := webrtc.SettingEngine{}
+
+// Exclude certain interfaces (e.g., exclude docker interfaces)
+s.SetInterfaceFilter(func(interfaceName string) bool {
+    // Return true to keep the interface
+    return interfaceName != "docker0"
+})
+
+// Exclude certain IPs (e.g., only use private IPs)
+s.SetIPFilter(func(ip net.IP) bool {
+    // Return true to keep the IP
+    return ip.IsPrivate()
+})
+```
+
+From [settingengine.go:292-306](https://github.com/pion/webrtc/blob/master/settingengine.go:292-306).
+
+## NAT Traversal
+
+### NAT 1:1 IPs
+
+Configure external IP addresses for servers behind NAT (e.g., AWS EC2 with Elastic IP):
+
+```go nat-1to1.go
+s := webrtc.SettingEngine{}
+
+// Use public IP for host candidates
+s.SetNAT1To1IPs(
+    []string{"203.0.113.1"}, 
+    webrtc.ICECandidateTypeHost,
+)
+
+// Or add server reflexive candidate with public IP
+s.SetNAT1To1IPs(
+    []string{"203.0.113.1"}, 
+    webrtc.ICECandidateTypeSrflx,
+)
+```
+
+<Warning>
+  `SetNAT1To1IPs` is deprecated. Use `SetICEAddressRewriteRules` for more fine-grained control.
+</Warning>
+
+### Address Rewrite Rules
+
+Modern alternative to NAT1To1IPs with more control:
+
+```go address-rewrite.go
+s := webrtc.SettingEngine{}
+
+rules := []webrtc.ICEAddressRewriteRule{
+    {
+        External:       []string{"203.0.113.1"},
+        AsCandidateType: webrtc.ICECandidateTypeHost,
+        Mode:           webrtc.ICEAddressRewriteReplace,
+    },
+}
+
+err := s.SetICEAddressRewriteRules(rules...)
+```
+
+From [settingengine.go:345-368](https://github.com/pion/webrtc/blob/master/settingengine.go:345-368).
+
+## DTLS Configuration
+
+### Retransmission Interval
+
+```go dtls-retransmit.go
+import "time"
+
+s := webrtc.SettingEngine{}
+
+// Set DTLS retransmission interval (faster or slower)
+s.SetDTLSRetransmissionInterval(1 * time.Second)
+```
+
+### Skip Hello Verify
+
+```go dtls-skip-verify.go
+s := webrtc.SettingEngine{}
+
+// Skip DTLS HelloVerify for faster connections (less DoS protection)
+s.SetDTLSInsecureSkipHelloVerify(true)
+```
+
+<Warning>
+  Skipping HelloVerify reduces protection against DoS attacks. Only use in trusted environments.
+</Warning>
+
+### Elliptic Curves
+
+```go dtls-curves.go
+import dtlsElliptic "github.com/pion/dtls/v3/pkg/crypto/elliptic"
+
+s := webrtc.SettingEngine{}
+
+// Configure which elliptic curves to use
+s.SetDTLSEllipticCurves(
+    dtlsElliptic.X25519,
+    dtlsElliptic.P256,
+)
+```
+
+### Connection Context
+
+Control DTLS handshake timeout:
+
+```go dtls-context.go
+import (
+    "context"
+    "time"
+)
+
+s := webrtc.SettingEngine{}
+
+s.SetDTLSConnectContextMaker(func() (context.Context, func()) {
+    // Custom timeout (default is 30s)
+    return context.WithTimeout(context.Background(), 10*time.Second)
+})
+```
+
+From [settingengine.go:543-552](https://github.com/pion/webrtc/blob/master/settingengine.go:543-552).
+
+## SCTP Configuration
+
+### Buffer Sizes
+
+```go sctp-buffer.go
+s := webrtc.SettingEngine{}
+
+// Set maximum receive buffer size
+s.SetSCTPMaxReceiveBufferSize(1024 * 1024) // 1MB
+
+// Set maximum message size
+s.SetSCTPMaxMessageSize(256 * 1024) // 256KB
+```
+
+### Zero Checksum
+
+```go sctp-checksum.go
+s := webrtc.SettingEngine{}
+
+// Enable zero checksum for lower latency (not backwards compatible)
+s.EnableSCTPZeroChecksum(true)
+```
+
+<Warning>
+  SCTP zero checksum is not backwards compatible. Only enable if both peers support it.
+</Warning>
+
+From [settingengine.go:586-591](https://github.com/pion/webrtc/blob/master/settingengine.go:586-591).
+
+## Advanced Features
+
+### Single Port (UDPMux)
+
+Serve multiple PeerConnections on a single UDP port:
+
+```go udp-mux.go
+import "github.com/pion/ice/v4"
+
+s := webrtc.SettingEngine{}
+
+// Create a UDPMux on port 8443
+mux, err := ice.NewMultiUDPMuxFromPort(8443)
+if err != nil {
+    panic(err)
+}
+
+s.SetICEUDPMux(mux)
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+
+// All PeerConnections will use port 8443
+peerConnection1, _ := api.NewPeerConnection(webrtc.Configuration{})
+peerConnection2, _ := api.NewPeerConnection(webrtc.Configuration{})
+```
+
+See the full example at [examples/ice-single-port/main.go](https://github.com/pion/webrtc/blob/master/examples/ice-single-port/main.go:82-97).
+
+### ICE-TCP
+
+Enable ICE over TCP:
+
+```go ice-tcp.go
+import "net"
+
+s := webrtc.SettingEngine{}
+
+// Enable TCP network types
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeTCP4,
+    webrtc.NetworkTypeTCP6,
+})
+
+// Create TCP listener
+tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{
+    IP:   net.IP{0, 0, 0, 0},
+    Port: 8443,
+})
+
+tcpMux := webrtc.NewICETCPMux(nil, tcpListener, 8)
+s.SetICETCPMux(tcpMux)
+```
+
+See the full example at [examples/ice-tcp/main.go](https://github.com/pion/webrtc/blob/master/examples/ice-tcp/main.go:87-106).
+
+### ICE Lite
+
+Configure as ICE Lite agent:
+
+```go ice-lite.go
+s := webrtc.SettingEngine{}
+
+// Enable ICE Lite mode
+s.SetLite(true)
+```
+
+From [settingengine.go:281-284](https://github.com/pion/webrtc/blob/master/settingengine.go:281-284).
+
+### Custom Logging
+
+Provide a custom logger factory:
+
+```go custom-logger.go
+import "github.com/pion/logging"
+
+type customLoggerFactory struct{}
+
+func (c customLoggerFactory) NewLogger(subsystem string) logging.LeveledLogger {
+    // Return your custom logger
+    return customLogger{}
+}
+
+s := webrtc.SettingEngine{
+    LoggerFactory: customLoggerFactory{},
+}
+```
+
+See the full example at [examples/custom-logger/main.go](https://github.com/pion/webrtc/blob/master/examples/custom-logger/main.go:46-64).
+
+### Data Channel Detach
+
+Detach data channels for direct I/O access:
+
+```go detach.go
+s := webrtc.SettingEngine{}
+
+// Enable data channel detaching
+s.DetachDataChannels()
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+
+dataChannel, _ := peerConnection.CreateDataChannel("data", nil)
+
+dataChannel.OnOpen(func() {
+    // Detach the data channel
+    raw, err := dataChannel.Detach()
+    if err != nil {
+        panic(err)
+    }
+    
+    // Now you have direct access to read/write
+    raw.Write([]byte("Hello"))
+})
+```
+
+From [settingengine.go:199-204](https://github.com/pion/webrtc/blob/master/settingengine.go:199-204).
+
+## Replay Protection
+
+### DTLS/SRTP Replay Protection
+
+```go replay-protection.go
+s := webrtc.SettingEngine{}
+
+// Set DTLS replay protection window
+s.SetDTLSReplayProtectionWindow(64)
+
+// Set SRTP replay protection window
+s.SetSRTPReplayProtectionWindow(64)
+
+// Set SRTCP replay protection window  
+s.SetSRTCPReplayProtectionWindow(64)
+
+// Or disable replay protection (not recommended)
+s.DisableSRTPReplayProtection(true)
+s.DisableSRTCPReplayProtection(true)
+```
+
+From [settingengine.go:432-457](https://github.com/pion/webrtc/blob/master/settingengine.go:432-457).
+
+## ICE Credentials
+
+Set static ICE credentials for signalless WebRTC:
+
+```go ice-credentials.go
+s := webrtc.SettingEngine{}
+
+// Set static credentials (useful for signalless WebRTC)
+s.SetICECredentials("myUserFragment", "myPassword")
+```
+
+From [settingengine.go:418-425](https://github.com/pion/webrtc/blob/master/settingengine.go:418-425).
+
+## Complete Example
+
+<Accordion title="Full SettingEngine Configuration Example">
+```go complete-example.go
+package main
+
+import (
+    "context"
+    "net"
+    "time"
+    
+    "github.com/pion/ice/v4"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    s := webrtc.SettingEngine{}
+    
+    // ICE Configuration
+    s.SetEphemeralUDPPortRange(10000, 20000)
+    s.SetICETimeouts(
+        5*time.Second,
+        25*time.Second,
+        2*time.Second,
+    )
+    
+    // Network filtering
+    s.SetInterfaceFilter(func(name string) bool {
+        return name != "docker0"
+    })
+    
+    s.SetIPFilter(func(ip net.IP) bool {
+        return ip.IsPrivate()
+    })
+    
+    // NAT configuration
+    rules := []webrtc.ICEAddressRewriteRule{
+        {
+            External:       []string{"203.0.113.1"},
+            AsCandidateType: webrtc.ICECandidateTypeHost,
+        },
+    }
+    s.SetICEAddressRewriteRules(rules...)
+    
+    // DTLS configuration
+    s.SetDTLSRetransmissionInterval(1 * time.Second)
+    s.SetDTLSConnectContextMaker(func() (context.Context, func()) {
+        return context.WithTimeout(context.Background(), 10*time.Second)
+    })
+    
+    // SCTP configuration
+    s.SetSCTPMaxReceiveBufferSize(1024 * 1024)
+    s.EnableSCTPZeroChecksum(false)
+    
+    // Create API with settings
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    
+    // Create PeerConnection
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    peerConnection, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    
+    // Use peerConnection...
+}
+```
+</Accordion>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="MediaEngine" icon="film" href="./media-engine">
+    Configure codecs and RTP parameters
+  </Card>
+  <Card title="Interceptors" icon="filter" href="./interceptors">
+    Modify RTP/RTCP packet processing
+  </Card>
+  <Card title="Custom Logging" icon="terminal" href="./custom-logging">
+    Implement custom logging
+  </Card>
+  <Card title="ICE Configuration" icon="network-wired" href="./ice-configuration">
+    Deep dive into ICE settings
+  </Card>
+</CardGroup>

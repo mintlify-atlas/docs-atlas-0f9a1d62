@@ -1,80 +1,730 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Build your first WebRTC application with Pion in minutes
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+This guide walks you through creating a simple WebRTC data channel application. You'll build a Go server that:
 
-### Step 1: Set up your local environment
+- Creates a PeerConnection
+- Establishes a DataChannel
+- Exchanges messages with a web browser
+- Handles ICE candidates and signaling
+
+<Tip>
+Data channels are perfect for real-time text communication, gaming, file transfer, or any low-latency data exchange.
+</Tip>
+
+## What You'll Build
+
+By the end of this guide, you'll have a working WebRTC server that:
+
+1. Accepts connections from web browsers
+2. Creates bidirectional data channels
+3. Sends and receives text messages in real-time
+4. Handles ICE gathering and signaling automatically
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- Go 1.24.0 or later installed
+- Pion WebRTC v4 installed ([Installation Guide](/installation))
+- Basic understanding of Go
+- A web browser for testing
+
+## Step 1: Create Your Project
+
+<Steps>
+  <Step title="Initialize Project">
+    ```bash
+    mkdir webrtc-datachannel
+    cd webrtc-datachannel
+    go mod init webrtc-datachannel
+    ```
+  </Step>
+  
+  <Step title="Install Pion WebRTC">
+    ```bash
+    go get github.com/pion/webrtc/v4
+    ```
+  </Step>
+</Steps>
+
+## Step 2: Create the Server
+
+Create a file named `main.go` with the following code:
+
+<CodeGroup>
+```go main.go
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+
+	"github.com/pion/webrtc/v4"
+)
+
+func main() {
+	var pc *webrtc.PeerConnection
+
+	setupOfferHandler(&pc)
+	setupCandidateHandler(&pc)
+	setupStaticHandler()
+
+	fmt.Println("🚀 Server started on http://localhost:8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		fmt.Printf("Failed to start server: %v\n", err)
+	}
+}
+
+func setupOfferHandler(pc **webrtc.PeerConnection) {
+	http.HandleFunc("/offer", func(w http.ResponseWriter, r *http.Request) {
+		var offer webrtc.SessionDescription
+		if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Create PeerConnection with STUN server
+		var err error
+		*pc, err = webrtc.NewPeerConnection(webrtc.Configuration{
+			ICEServers: []webrtc.ICEServer{
+				{URLs: []string{"stun:stun.l.google.com:19302"}},
+			},
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		setupICECandidateHandler(*pc)
+		setupDataChannelHandler(*pc)
+
+		if err := processOffer(*pc, offer, w); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+}
+
+func setupICECandidateHandler(pc *webrtc.PeerConnection) {
+	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+		if c != nil {
+			fmt.Printf("🌐 New ICE candidate: %s\n", c.Address)
+		}
+	})
+}
+
+func setupDataChannelHandler(pc *webrtc.PeerConnection) {
+	pc.OnDataChannel(func(d *webrtc.DataChannel) {
+		d.OnOpen(func() {
+			fmt.Println("✅ DataChannel opened")
+			if err := d.SendText("Hello from Go server!"); err != nil {
+				fmt.Printf("Send error: %v\n", err)
+			}
+		})
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			fmt.Printf("📩 Received: %s\n", string(msg.Data))
+		})
+	})
+}
+
+func processOffer(
+	pc *webrtc.PeerConnection,
+	offer webrtc.SessionDescription,
+	w http.ResponseWriter,
+) error {
+	// Set remote description
+	if err := pc.SetRemoteDescription(offer); err != nil {
+		return err
+	}
+
+	// Create answer
+	answer, err := pc.CreateAnswer(nil)
+	if err != nil {
+		return err
+	}
+
+	// Set local description
+	if err := pc.SetLocalDescription(answer); err != nil {
+		return err
+	}
+
+	// Wait for ICE gathering to complete
+	gatherComplete := webrtc.GatheringCompletePromise(pc)
+	<-gatherComplete
+
+	finalAnswer := pc.LocalDescription()
+	if finalAnswer == nil {
+		return fmt.Errorf("local description is nil")
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(*finalAnswer)
+}
+
+func setupCandidateHandler(pc **webrtc.PeerConnection) {
+	http.HandleFunc("/candidate", func(w http.ResponseWriter, r *http.Request) {
+		var candidate webrtc.ICECandidateInit
+		if err := json.NewDecoder(r.Body).Decode(&candidate); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if *pc != nil {
+			if err := (*pc).AddICECandidate(candidate); err != nil {
+				fmt.Println("Failed to add candidate:", err)
+			}
+		}
+	})
+}
+
+func setupStaticHandler() {
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, indexHTML)
+	})
+}
+
+const indexHTML = `<!DOCTYPE html>
+<html>
+<head>
+    <title>Pion WebRTC Data Channel</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        #messages { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin: 20px 0; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        input { padding: 10px; width: 300px; }
+        .message { margin: 5px 0; padding: 5px; }
+        .sent { color: blue; }
+        .received { color: green; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Pion WebRTC Data Channel Demo</h1>
+    <button onclick="connect()">Connect</button>
+    <div id="status">Status: Disconnected</div>
+    <div id="messages"></div>
+    <input id="messageInput" type="text" placeholder="Type a message..." disabled />
+    <button onclick="sendMessage()" disabled id="sendBtn">Send</button>
+
+    <script>
+        let pc = null;
+        let dataChannel = null;
+
+        async function connect() {
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+
+            pc.onicecandidate = e => {
+                if (e.candidate) {
+                    fetch('/candidate', {
+                        method: 'POST',
+                        body: JSON.stringify(e.candidate)
+                    });
+                }
+            };
+
+            dataChannel = pc.createDataChannel('data');
+            dataChannel.onopen = () => {
+                document.getElementById('status').textContent = 'Status: Connected ✅';
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                addMessage('Connected to server!', 'system');
+            };
+
+            dataChannel.onmessage = e => {
+                addMessage(e.data, 'received');
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            const response = await fetch('/offer', {
+                method: 'POST',
+                body: JSON.stringify(offer)
+            });
+            const answer = await response.json();
+            await pc.setRemoteDescription(answer);
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value;
+            if (message && dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(message);
+                addMessage(message, 'sent');
+                input.value = '';
+            }
+        }
+
+        function addMessage(text, type) {
+            const div = document.createElement('div');
+            div.className = 'message ' + type;
+            div.textContent = (type === 'sent' ? '→ ' : '← ') + text;
+            document.getElementById('messages').appendChild(div);
+        }
+
+        document.getElementById('messageInput').addEventListener('keypress', e => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>`
+```
+</CodeGroup>
+
+## Step 3: Understanding the Code
+
+Let's break down the key components:
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+  <Accordion title="PeerConnection Configuration">
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    }
+    pc, err := webrtc.NewPeerConnection(config)
+    ```
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+    The `Configuration` specifies STUN servers for NAT traversal. Google's public STUN server helps establish connections through firewalls.
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+
+  <Accordion title="DataChannel Event Handlers">
+    ```go
+    pc.OnDataChannel(func(d *webrtc.DataChannel) {
+        d.OnOpen(func() {
+            // Channel is ready to send/receive
+            d.SendText("Hello!")
+        })
+        d.OnMessage(func(msg webrtc.DataChannelMessage) {
+            // Handle incoming messages
+            fmt.Printf("Received: %s\n", string(msg.Data))
+        })
+    })
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+    Event handlers respond to channel lifecycle events and incoming messages.
+  </Accordion>
+
+  <Accordion title="Offer/Answer Exchange">
+    ```go
+    // Set remote description (offer from browser)
+    pc.SetRemoteDescription(offer)
+    
+    // Create answer
+    answer, err := pc.CreateAnswer(nil)
+    
+    // Set local description
+    pc.SetLocalDescription(answer)
+    
+    // Wait for ICE gathering
+    gatherComplete := webrtc.GatheringCompletePromise(pc)
+    <-gatherComplete
+    ```
+    
+    This implements the SDP offer/answer exchange for WebRTC signaling.
+  </Accordion>
+
+  <Accordion title="ICE Candidate Handling">
+    ```go
+    pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+        if c != nil {
+            // New ICE candidate discovered
+            fmt.Printf("ICE candidate: %s\n", c.Address)
+        }
+    })
+    ```
+    
+    ICE candidates represent possible connection paths. In this example, we use complete ICE gathering instead of trickle ICE for simplicity.
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## Step 4: Run Your Application
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+<Steps>
+  <Step title="Start the Server">
+    ```bash
+    go run main.go
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    You should see:
+    ```
+    🚀 Server started on http://localhost:8080
+    ```
+  </Step>
+  
+  <Step title="Open in Browser">
+    Navigate to [http://localhost:8080](http://localhost:8080) in your web browser.
+  </Step>
+  
+  <Step title="Connect">
+    Click the "Connect" button. You'll see the connection establish in real-time.
+  </Step>
+  
+  <Step title="Send Messages">
+    Type a message and click "Send" or press Enter. Watch messages flow bidirectionally!
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Expected Output
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+When you connect, the server terminal will show:
 
-### Step 3: Go live
+```bash
+🌐 New ICE candidate: 192.168.1.100
+✅ DataChannel opened
+📩 Received: Hello from browser!
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+The browser will display:
+```
+Status: Connected ✅
+← Hello from Go server!
+→ Hello from browser!
+```
 
-## Next steps
+## More Complex Example: Pion-to-Pion
 
-Now that you have your docs running, explore these key features:
+For server-to-server communication, check out this example from the Pion repository:
 
-<CardGroup cols={2}>
+<CodeGroup>
+```go Offer Side (pion-to-pion/offer/main.go)
+package main
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+import (
+	"github.com/pion/webrtc/v4"
+	"time"
+)
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+func main() {
+	// Configure PeerConnection
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
+	}
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+	// Create PeerConnection
+	pc, err := webrtc.NewPeerConnection(config)
+	if err != nil {
+		panic(err)
+	}
+	defer pc.Close()
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+	// Create DataChannel
+	dataChannel, err := pc.CreateDataChannel("data", nil)
+	if err != nil {
+		panic(err)
+	}
 
-</CardGroup>
+	// Set up handlers
+	dataChannel.OnOpen(func() {
+		fmt.Println("Data channel opened")
+		
+		// Send periodic messages
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		
+		for range ticker.C {
+			message := "Hello from Pion!"
+			fmt.Printf("Sending: %s\n", message)
+			dataChannel.SendText(message)
+		}
+	})
+
+	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		fmt.Printf("Received: %s\n", string(msg.Data))
+	})
+
+	// Create offer
+	offer, err := pc.CreateOffer(nil)
+	if err != nil {
+		panic(err)
+	}
+
+	// Set local description
+	if err = pc.SetLocalDescription(offer); err != nil {
+		panic(err)
+	}
+
+	// Exchange SDP with answer side...
+	// (See full example in repository)
+}
+```
+
+```go Answer Side (pion-to-pion/answer/main.go)
+package main
+
+import (
+	"github.com/pion/webrtc/v4"
+)
+
+func main() {
+	// Configure PeerConnection
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{
+			{URLs: []string{"stun:stun.l.google.com:19302"}},
+		},
+	}
+
+	// Create PeerConnection
+	pc, err := webrtc.NewPeerConnection(config)
+	if err != nil {
+		panic(err)
+	}
+	defer pc.Close()
+
+	// Handle incoming data channels
+	pc.OnDataChannel(func(d *webrtc.DataChannel) {
+		d.OnOpen(func() {
+			fmt.Println("Data channel opened")
+		})
+		
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			fmt.Printf("Received: %s\n", string(msg.Data))
+			
+			// Echo back
+			d.SendText("Echo: " + string(msg.Data))
+		})
+	})
+
+	// Receive offer and create answer...
+	// (See full example in repository)
+}
+```
+</CodeGroup>
+
+<Tip>
+Find the complete pion-to-pion example with full signaling implementation at:
+[github.com/pion/webrtc/tree/master/examples/pion-to-pion](https://github.com/pion/webrtc/tree/master/examples/pion-to-pion)
+</Tip>
+
+## Key Concepts Explained
+
+### PeerConnection Lifecycle
+
+<Steps>
+  <Step title="New">
+    PeerConnection is created but no connection attempt started
+  </Step>
+  <Step title="Connecting">
+    ICE candidates are being gathered and connectivity checks are running
+  </Step>
+  <Step title="Connected">
+    At least one ICE candidate pair succeeded and media can flow
+  </Step>
+  <Step title="Failed">
+    Connection couldn't be established (may be recoverable with ICE restart)
+  </Step>
+  <Step title="Closed">
+    Connection was explicitly closed
+  </Step>
+</Steps>
+
+Monitor the connection state:
+
+```go
+pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    fmt.Printf("Connection State: %s\n", state.String())
+    
+    if state == webrtc.PeerConnectionStateFailed {
+        // Handle failure
+    }
+})
+```
+
+### DataChannel Options
+
+Customize DataChannel behavior:
+
+```go
+// Ordered, reliable (default - like TCP)
+dc, _ := pc.CreateDataChannel("reliable", nil)
+
+// Unordered, unreliable (like UDP)
+dc, _ := pc.CreateDataChannel("unreliable", &webrtc.DataChannelInit{
+    Ordered: ptrBool(false),
+    MaxRetransmits: ptrUint16(0),
+})
+
+// Partially reliable (max 3 retransmits)
+dc, _ := pc.CreateDataChannel("partial", &webrtc.DataChannelInit{
+    MaxRetransmits: ptrUint16(3),
+})
+
+func ptrBool(b bool) *bool { return &b }
+func ptrUint16(u uint16) *uint16 { return &u }
+```
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+**DataChannel Types:**
+- **Ordered + Reliable** - Guaranteed delivery in order (default)
+- **Unordered + Unreliable** - Best for real-time gaming, live streams
+- **Partially Reliable** - Balance between reliability and latency
 </Note>
+
+### Signaling Patterns
+
+This quickstart uses HTTP for signaling, but production apps typically use:
+
+- **WebSocket** - For real-time bidirectional signaling
+- **WHIP/WHEP** - Standardized HTTP-based signaling
+- **Custom Protocol** - Over any transport (Redis, MQTT, etc.)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Send Media"
+    icon="video"
+    href="https://github.com/pion/webrtc/tree/master/examples/play-from-disk"
+  >
+    Learn to send audio and video from files or live sources
+  </Card>
+  
+  <Card
+    title="Receive Media"
+    icon="download"
+    href="https://github.com/pion/webrtc/tree/master/examples/save-to-disk"
+  >
+    Capture and save incoming audio/video streams
+  </Card>
+  
+  <Card
+    title="Advanced Examples"
+    icon="code"
+    href="https://github.com/pion/webrtc/tree/master/examples"
+  >
+    Explore simulcast, renegotiation, stats, and more
+  </Card>
+  
+  <Card
+    title="API Reference"
+    icon="book"
+    href="https://pkg.go.dev/github.com/pion/webrtc/v4"
+  >
+    Deep dive into the complete Pion WebRTC API
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### Broadcasting to Multiple Peers
+
+```go
+type Broadcaster struct {
+    peers map[string]*webrtc.PeerConnection
+    mu    sync.RWMutex
+}
+
+func (b *Broadcaster) Broadcast(message string) {
+    b.mu.RLock()
+    defer b.mu.RUnlock()
+    
+    for id, pc := range b.peers {
+        // Get all data channels for this peer
+        // Send message to each
+    }
+}
+```
+
+### Handling Connection Failures
+
+```go
+pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    switch state {
+    case webrtc.PeerConnectionStateFailed:
+        // Try ICE restart
+        offer, _ := pc.CreateOffer(&webrtc.OfferOptions{
+            ICERestart: true,
+        })
+        pc.SetLocalDescription(offer)
+        
+    case webrtc.PeerConnectionStateClosed:
+        // Clean up resources
+    }
+})
+```
+
+### Binary Data Transfer
+
+```go
+// Send binary data
+data := []byte{0x01, 0x02, 0x03, 0x04}
+dataChannel.Send(data)
+
+// Receive binary data
+dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+    if msg.IsString {
+        fmt.Printf("Text: %s\n", string(msg.Data))
+    } else {
+        fmt.Printf("Binary: %v\n", msg.Data)
+    }
+})
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection stays in 'connecting' state">
+    - Verify STUN server is reachable
+    - Check firewall settings
+    - Ensure ICE candidates are being exchanged
+    - Try adding a TURN server for relay
+  </Accordion>
+  
+  <Accordion title="DataChannel never opens">
+    - Confirm both sides have completed SDP exchange
+    - Check that SetRemoteDescription was called
+    - Verify ICE gathering completed before exchanging SDP
+    - Look for errors in OnDataChannel handler
+  </Accordion>
+  
+  <Accordion title="Messages not being received">
+    - Ensure DataChannel.OnMessage is set before channel opens
+    - Check DataChannel.ReadyState (should be 'open')
+    - Verify no errors from SendText/Send
+    - Check for SCTP congestion or flow control
+  </Accordion>
+  
+  <Accordion title="High latency or packet loss">
+    - Use unordered, unreliable channels for real-time data
+    - Consider adjusting MaxRetransmits
+    - Check network conditions with stats
+    - Monitor DataChannel.BufferedAmount
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+**Production Checklist:**
+- Implement proper error handling
+- Use secure signaling (WSS, HTTPS)
+- Add authentication/authorization
+- Configure TURN servers for NAT traversal
+- Monitor connection statistics
+- Handle reconnection logic
+- Clean up resources on close
+</Warning>
+
+## Learn More
+
+<Card
+  title="WebRTC for the Curious"
+  icon="book-open"
+  href="https://webrtcforthecurious.com"
+>
+  Understand WebRTC protocols at a deep level: ICE, DTLS, SCTP, RTP, and more
+</Card>
+
+**Join the Community:**
+- Discord: [discord.gg/PngbdqpFbt](https://discord.gg/PngbdqpFbt)
+- GitHub: [github.com/pion/webrtc](https://github.com/pion/webrtc)
+- Examples: [github.com/pion/webrtc/tree/master/examples](https://github.com/pion/webrtc/tree/master/examples)
+
+Happy coding! 🚀

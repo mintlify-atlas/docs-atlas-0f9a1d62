@@ -1,0 +1,605 @@
+---
+title: SessionDescription
+description: Handle SDP negotiation for establishing WebRTC connections
+---
+
+## Overview
+
+The `SessionDescription` type is used to expose local and remote session descriptions. It encapsulates the Session Description Protocol (SDP) information exchanged between peers during connection establishment.
+
+<Info>
+  Source: `sessiondescription.go:39-46`
+</Info>
+
+## Type Definition
+
+```go
+type SessionDescription struct {
+    Type   SDPType
+    SDP    string
+    parsed *sdp.SessionDescription // Internal use only
+}
+```
+
+<ParamField path="Type" type="SDPType">
+  The type of session description (offer, answer, pranswer, or rollback)
+</ParamField>
+
+<ParamField path="SDP" type="string">
+  The SDP string content
+</ParamField>
+
+<ParamField path="parsed" type="*sdp.SessionDescription">
+  Internal parsed representation (not initialized by callers)
+</ParamField>
+
+## SDPType Enumeration
+
+The `SDPType` describes the type of a SessionDescription.
+
+<Info>
+  Source: `sdptype.go:11-39`
+</Info>
+
+```go
+type SDPType int
+
+const (
+    SDPTypeUnknown  SDPType = iota  // Zero-value, invalid
+    SDPTypeOffer                     // SDP offer
+    SDPTypePranswer                  // Provisional answer
+    SDPTypeAnswer                    // Final answer
+    SDPTypeRollback                  // Cancel negotiation
+)
+```
+
+### SDPTypeOffer
+
+<ParamField path="SDPTypeOffer" type="SDPType">
+  Indicates that a description MUST be treated as an SDP offer.
+</ParamField>
+
+Used when initiating a connection or renegotiating.
+
+```go
+offer, err := pc.CreateOffer(nil)
+if err != nil {
+    return err
+}
+
+fmt.Println(offer.Type) // Output: offer
+```
+
+### SDPTypePranswer
+
+<ParamField path="SDPTypePranswer" type="SDPType">
+  Indicates that a description MUST be treated as an SDP provisional answer, but not a final answer.
+</ParamField>
+
+A pranswer may be applied as a response to an SDP offer, or an update to a previously sent SDP pranswer.
+
+<Note>
+  Provisional answers are rarely used in practice. Most applications use immediate final answers.
+</Note>
+
+### SDPTypeAnswer
+
+<ParamField path="SDPTypeAnswer" type="SDPType">
+  Indicates that a description MUST be treated as an SDP final answer, and the offer-answer exchange MUST be considered complete.
+</ParamField>
+
+Used to respond to an offer or update a previously sent pranswer.
+
+```go
+answer, err := pc.CreateAnswer(nil)
+if err != nil {
+    return err
+}
+
+fmt.Println(answer.Type) // Output: answer
+```
+
+### SDPTypeRollback
+
+<ParamField path="SDPTypeRollback" type="SDPType">
+  Indicates that a description MUST be treated as canceling the current SDP negotiation and moving the SDP offer and answer back to what it was in the previous stable state.
+</ParamField>
+
+Used to abort a negotiation in progress.
+
+```go
+rollback := webrtc.SessionDescription{
+    Type: webrtc.SDPTypeRollback,
+}
+
+err := pc.SetLocalDescription(rollback)
+```
+
+## SDPType Methods
+
+### NewSDPType
+
+Creates an SDPType from a string.
+
+<Info>
+  Source: `sdptype.go:49-63`
+</Info>
+
+```go
+func NewSDPType(raw string) SDPType
+```
+
+<ParamField path="raw" type="string">
+  String representation ("offer", "pranswer", "answer", or "rollback")
+</ParamField>
+
+<ResponseField name="return" type="SDPType">
+  The corresponding SDPType, or SDPTypeUnknown if invalid
+</ResponseField>
+
+```go
+sdpType := webrtc.NewSDPType("offer")
+fmt.Println(sdpType == webrtc.SDPTypeOffer) // true
+```
+
+### String
+
+Returns the string representation of an SDPType.
+
+<Info>
+  Source: `sdptype.go:65-78`
+</Info>
+
+```go
+func (t SDPType) String() string
+```
+
+<ResponseField name="return" type="string">
+  String representation of the SDPType
+</ResponseField>
+
+```go
+sdpType := webrtc.SDPTypeOffer
+fmt.Println(sdpType.String()) // "offer"
+```
+
+## SessionDescription Methods
+
+### Unmarshal
+
+A helper to deserialize the SDP.
+
+<Info>
+  Source: `sessiondescription.go:48-57`
+</Info>
+
+```go
+func (sd *SessionDescription) Unmarshal() (*sdp.SessionDescription, error)
+```
+
+<ResponseField name="parsed" type="*sdp.SessionDescription">
+  Parsed SDP structure
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if unmarshaling fails
+</ResponseField>
+
+```go
+sd := webrtc.SessionDescription{
+    Type: webrtc.SDPTypeOffer,
+    SDP:  receivedSDPString,
+}
+
+parsed, err := sd.Unmarshal()
+if err != nil {
+    return err
+}
+```
+
+<Note>
+  This method is typically used internally. Most application code doesn't need to call it directly.
+</Note>
+
+## Usage with PeerConnection
+
+### Creating an Offer
+
+```go
+offer, err := pc.CreateOffer(nil)
+if err != nil {
+    return err
+}
+
+// Offer is a SessionDescription with Type = SDPTypeOffer
+fmt.Printf("Type: %s\n", offer.Type)
+fmt.Printf("SDP: %s\n", offer.SDP)
+
+// Set as local description
+err = pc.SetLocalDescription(offer)
+if err != nil {
+    return err
+}
+
+// Send offer.SDP to remote peer via signaling
+sendToRemotePeer(offer.SDP)
+```
+
+### Handling a Remote Offer
+
+```go
+// Receive SDP from remote peer
+remoteSDP := receiveFromRemotePeer()
+
+// Create SessionDescription
+remoteOffer := webrtc.SessionDescription{
+    Type: webrtc.SDPTypeOffer,
+    SDP:  remoteSDP,
+}
+
+// Set as remote description
+err := pc.SetRemoteDescription(remoteOffer)
+if err != nil {
+    return err
+}
+
+// Create and send answer
+answer, err := pc.CreateAnswer(nil)
+if err != nil {
+    return err
+}
+
+err = pc.SetLocalDescription(answer)
+if err != nil {
+    return err
+}
+
+sendToRemotePeer(answer.SDP)
+```
+
+### Creating an Answer
+
+```go
+// After receiving and setting a remote offer
+answer, err := pc.CreateAnswer(nil)
+if err != nil {
+    return err
+}
+
+// Answer is a SessionDescription with Type = SDPTypeAnswer
+err = pc.SetLocalDescription(answer)
+if err != nil {
+    return err
+}
+
+// Send answer.SDP to remote peer
+sendToRemotePeer(answer.SDP)
+```
+
+## ICE Trickle Support
+
+The SessionDescription type works with ICE trickle capability detection.
+
+<Info>
+  Source: `sessiondescription.go:14-37`
+</Info>
+
+### ICETrickleCapability
+
+```go
+type ICETrickleCapability int
+
+const (
+    ICETrickleCapabilityUnknown     ICETrickleCapability = iota
+    ICETrickleCapabilitySupported
+    ICETrickleCapabilityUnsupported
+)
+```
+
+<ParamField path="ICETrickleCapabilityUnknown" type="int">
+  No remote peer has been established
+</ParamField>
+
+<ParamField path="ICETrickleCapabilitySupported" type="int">
+  Remote peer can accept trickled ICE candidates
+</ParamField>
+
+<ParamField path="ICETrickleCapabilityUnsupported" type="int">
+  Remote peer didn't state that it can accept trickle ICE candidates
+</ParamField>
+
+```go
+capability := pc.CanTrickleICECandidates()
+
+switch capability {
+case webrtc.ICETrickleCapabilitySupported:
+    // Can send candidates as they're gathered
+    fmt.Println("Trickle ICE supported")
+case webrtc.ICETrickleCapabilityUnsupported:
+    // Must wait for all candidates before signaling
+    fmt.Println("Trickle ICE not supported")
+default:
+    fmt.Println("Trickle ICE capability unknown")
+}
+```
+
+## Complete Signaling Example
+
+<CodeGroup>
+```go Offerer
+package main
+
+import (
+    "encoding/json"
+    "github.com/pion/webrtc/v4"
+)
+
+func createOffer(pc *webrtc.PeerConnection, signaling chan []byte) error {
+    // Create offer
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return err
+    }
+
+    // Set local description
+    err = pc.SetLocalDescription(offer)
+    if err != nil {
+        return err
+    }
+
+    // Marshal and send offer
+    offerJSON, err := json.Marshal(offer)
+    if err != nil {
+        return err
+    }
+    signaling <- offerJSON
+
+    // Wait for answer
+    answerJSON := <-signaling
+
+    // Unmarshal answer
+    var answer webrtc.SessionDescription
+    err = json.Unmarshal(answerJSON, &answer)
+    if err != nil {
+        return err
+    }
+
+    // Set remote description
+    return pc.SetRemoteDescription(answer)
+}
+```
+
+```go Answerer
+package main
+
+import (
+    "encoding/json"
+    "github.com/pion/webrtc/v4"
+)
+
+func handleOffer(pc *webrtc.PeerConnection, signaling chan []byte) error {
+    // Wait for offer
+    offerJSON := <-signaling
+
+    // Unmarshal offer
+    var offer webrtc.SessionDescription
+    err := json.Unmarshal(offerJSON, &offer)
+    if err != nil {
+        return err
+    }
+
+    // Set remote description
+    err = pc.SetRemoteDescription(offer)
+    if err != nil {
+        return err
+    }
+
+    // Create answer
+    answer, err := pc.CreateAnswer(nil)
+    if err != nil {
+        return err
+    }
+
+    // Set local description
+    err = pc.SetLocalDescription(answer)
+    if err != nil {
+        return err
+    }
+
+    // Marshal and send answer
+    answerJSON, err := json.Marshal(answer)
+    if err != nil {
+        return err
+    }
+    signaling <- answerJSON
+
+    return nil
+}
+```
+</CodeGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Always Set Locally First" icon="arrow-down">
+    Always call SetLocalDescription with the offer/answer you created before sending it to the remote peer.
+  </Card>
+
+  <Card title="Error Handling" icon="exclamation-triangle">
+    Check errors from CreateOffer, CreateAnswer, and SetLocalDescription/SetRemoteDescription - they can fail.
+  </Card>
+
+  <Card title="Signaling Independence" icon="network-wired">
+    SessionDescriptions are just data - you choose how to exchange them (WebSocket, HTTP, etc.).
+  </Card>
+
+  <Card title="JSON Serialization" icon="file-code">
+    SessionDescription has JSON tags and can be marshaled/unmarshaled directly.
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+<AccordionGroup>
+  <Accordion title="Perfect Negotiation Pattern">
+    Handle offer collisions gracefully:
+
+    ```go
+    func handleNegotiation(pc *webrtc.PeerConnection, isPolite bool) {
+        pc.OnNegotiationNeeded(func() {
+            offer, err := pc.CreateOffer(nil)
+            if err != nil {
+                return
+            }
+
+            err = pc.SetLocalDescription(offer)
+            if err != nil {
+                return
+            }
+
+            // Send offer
+        })
+
+        // On receiving offer
+        onOfferReceived := func(offer webrtc.SessionDescription) error {
+            // Check for collision
+            if pc.SignalingState() != webrtc.SignalingStateStable {
+                if !isPolite {
+                    // Ignore the offer
+                    return nil
+                }
+                // Rollback local offer
+                err := pc.SetLocalDescription(webrtc.SessionDescription{
+                    Type: webrtc.SDPTypeRollback,
+                })
+                if err != nil {
+                    return err
+                }
+            }
+
+            err := pc.SetRemoteDescription(offer)
+            if err != nil {
+                return err
+            }
+
+            answer, err := pc.CreateAnswer(nil)
+            if err != nil {
+                return err
+            }
+
+            return pc.SetLocalDescription(answer)
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="SDP Manipulation">
+    Modify SDP before setting (advanced):
+
+    ```go
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return err
+    }
+
+    // Parse the SDP
+    parsed, err := offer.Unmarshal()
+    if err != nil {
+        return err
+    }
+
+    // Modify bandwidth, add attributes, etc.
+    for _, media := range parsed.MediaDescriptions {
+        media.Bandwidth = append(media.Bandwidth, sdp.Bandwidth{
+            Experimental: false,
+            Type:         "AS",
+            Bandwidth:    1000,
+        })
+    }
+
+    // Marshal back to string
+    modifiedSDP, err := parsed.Marshal()
+    if err != nil {
+        return err
+    }
+
+    offer.SDP = string(modifiedSDP)
+
+    // Now set the modified offer
+    err = pc.SetLocalDescription(offer)
+    ```
+  </Accordion>
+
+  <Accordion title="Renegotiation">
+    Handle mid-call changes:
+
+    ```go
+    // Add a new track mid-call
+    newTrack, err := webrtc.NewTrackLocalStaticSample(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+        "video",
+        "pion",
+    )
+    if err != nil {
+        return err
+    }
+
+    _, err = pc.AddTrack(newTrack)
+    if err != nil {
+        return err
+    }
+
+    // Create new offer for renegotiation
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return err
+    }
+
+    err = pc.SetLocalDescription(offer)
+    if err != nil {
+        return err
+    }
+
+    // Send new offer to peer
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="SetRemoteDescription Fails">
+    Common causes:
+    - SDP format is invalid or corrupted
+    - Wrong SDPType for current signaling state
+    - Missing media sections that were in previous offer
+
+    ```go
+    err := pc.SetRemoteDescription(desc)
+    if err != nil {
+        fmt.Printf("Failed to set remote description: %v\n", err)
+        fmt.Printf("Current signaling state: %s\n", pc.SignalingState())
+        fmt.Printf("Description type: %s\n", desc.Type)
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Empty SDP String">
+    According to JSEP 5.4, you can set an empty SDP string:
+
+    ```go
+    // This will use the last created offer
+    err := pc.SetLocalDescription(webrtc.SessionDescription{
+        Type: webrtc.SDPTypeOffer,
+        SDP:  "", // Will use last created offer
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## See Also
+
+- [PeerConnection](/api/peer-connection) - Creating and setting descriptions
+- [Configuration](/api/configuration) - Connection configuration
+- [SDP Specification](https://datatracker.ietf.org/doc/html/rfc4566) - Session Description Protocol
+- [JSEP](https://datatracker.ietf.org/doc/html/rfc8829) - JavaScript Session Establishment Protocol

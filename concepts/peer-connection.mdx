@@ -1,0 +1,531 @@
+---
+title: 'PeerConnection'
+description: 'Managing WebRTC peer connections and their lifecycle in Pion'
+---
+
+## Overview
+
+The `PeerConnection` is the central component in Pion WebRTC, representing a connection between two peers. It manages the entire lifecycle of a WebRTC session, from ICE candidate gathering to media transmission.
+
+```go peerconnection.go
+// PeerConnection represents a WebRTC connection that establishes a
+// peer-to-peer communications with another PeerConnection instance in a
+// browser, or to another endpoint implementing the required protocols.
+type PeerConnection struct {
+    id string
+    mu sync.RWMutex
+
+    sdpOrigin sdp.Origin
+
+    // ops is an operations queue which will ensure the enqueued actions are
+    // executed in order. It is used for asynchronously, but serially processing
+    // remote and local descriptions
+    ops *operations
+
+    configuration Configuration
+
+    currentLocalDescription  *SessionDescription
+    pendingLocalDescription  *SessionDescription
+    currentRemoteDescription *SessionDescription
+    pendingRemoteDescription *SessionDescription
+    signalingState           SignalingState
+    iceConnectionState       atomic.Value // ICEConnectionState
+    connectionState          atomic.Value // PeerConnectionState
+
+    rtpTransceivers        []*RTPTransceiver
+
+    iceGatherer   *ICEGatherer
+    iceTransport  *ICETransport
+    dtlsTransport *DTLSTransport
+    sctpTransport *SCTPTransport
+
+    api *API
+}
+```
+
+## Creating a PeerConnection
+
+### Using Default Settings
+
+```go
+import "github.com/pion/webrtc/v4"
+
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+    },
+}
+
+pc, err := webrtc.NewPeerConnection(config)
+if err != nil {
+    panic(err)
+}
+defer pc.Close()
+```
+
+### Using Custom API
+
+The source code shows how `NewPeerConnection` works:
+
+```go peerconnection.go
+// NewPeerConnection creates a PeerConnection with the default codecs and interceptors.
+func NewPeerConnection(configuration Configuration) (*PeerConnection, error) {
+    api := NewAPI()
+    return api.NewPeerConnection(configuration)
+}
+
+// NewPeerConnection creates a new PeerConnection with the provided configuration
+func (api *API) NewPeerConnection(configuration Configuration) (*PeerConnection, error) {
+    pc := &PeerConnection{
+        id: fmt.Sprintf("PeerConnection-%d", time.Now().UnixNano()),
+        configuration: Configuration{
+            ICEServers:           []ICEServer{},
+            ICETransportPolicy:   ICETransportPolicyAll,
+            BundlePolicy:         BundlePolicyBalanced,
+            RTCPMuxPolicy:        RTCPMuxPolicyRequire,
+            Certificates:         []Certificate{},
+            ICECandidatePoolSize: 0,
+        },
+        signalingState: SignalingStateStable,
+        api:            api,
+    }
+    
+    // Initialize transports and complete setup...
+    return pc, nil
+}
+```
+
+<Note>
+Each PeerConnection gets a unique ID based on the current timestamp, useful for debugging and logging.
+</Note>
+
+## Signaling States
+
+The PeerConnection goes through different signaling states during negotiation:
+
+<Steps>
+  <Step title="Stable">
+    No offer/answer exchange in progress. This is the initial state and the state after a successful negotiation.
+  </Step>
+  <Step title="Have Local Offer">
+    Local peer has created an offer and called `SetLocalDescription()`.
+  </Step>
+  <Step title="Have Remote Offer">
+    Remote peer has sent an offer which was set via `SetRemoteDescription()`.
+  </Step>
+  <Step title="Have Local Pranswer">
+    Local peer has created a provisional answer.
+  </Step>
+  <Step title="Have Remote Pranswer">
+    Remote peer has sent a provisional answer.
+  </Step>
+</Steps>
+
+### Monitoring Signaling State
+
+```go peerconnection.go
+pc.OnSignalingStateChange(func(state webrtc.SignalingState) {
+    fmt.Printf("Signaling state changed: %s\n", state)
+})
+```
+
+The implementation from the source:
+
+```go peerconnection.go
+func (pc *PeerConnection) onSignalingStateChange(newState SignalingState) {
+    pc.mu.RLock()
+    handler := pc.onSignalingStateChangeHandler
+    pc.mu.RUnlock()
+
+    pc.log.Infof("signaling state changed to %s", newState)
+    if handler != nil {
+        go handler(newState)
+    }
+}
+```
+
+## Connection States
+
+The overall connection state is derived from ICE and DTLS transport states:
+
+```go peerconnection.go
+func (pc *PeerConnection) updateConnectionState(
+    iceConnectionState ICEConnectionState,
+    dtlsTransportState DTLSTransportState,
+) {
+    connectionState := PeerConnectionStateNew
+    switch {
+    case pc.isClosed.Load():
+        connectionState = PeerConnectionStateClosed
+    case iceConnectionState == ICEConnectionStateFailed || dtlsTransportState == DTLSTransportStateFailed:
+        connectionState = PeerConnectionStateFailed
+    case iceConnectionState == ICEConnectionStateDisconnected:
+        connectionState = PeerConnectionStateDisconnected
+    case (iceConnectionState == ICEConnectionStateConnected ||
+          iceConnectionState == ICEConnectionStateCompleted) &&
+         (dtlsTransportState == DTLSTransportStateConnected):
+        connectionState = PeerConnectionStateConnected
+    }
+    
+    if pc.connectionState.Load() == connectionState {
+        return
+    }
+    
+    pc.onConnectionStateChange(connectionState)
+}
+```
+
+### Connection State Handlers
+
+```go
+pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    switch state {
+    case webrtc.PeerConnectionStateConnected:
+        fmt.Println("Peer connection established")
+    case webrtc.PeerConnectionStateDisconnected:
+        fmt.Println("Peer connection lost")
+    case webrtc.PeerConnectionStateFailed:
+        fmt.Println("Peer connection failed")
+    case webrtc.PeerConnectionStateClosed:
+        fmt.Println("Peer connection closed")
+    }
+})
+```
+
+## Creating Offers and Answers
+
+### Creating an Offer
+
+```go peerconnection.go
+// CreateOffer starts the PeerConnection and generates the localDescription
+func (pc *PeerConnection) CreateOffer(options *OfferOptions) (SessionDescription, error) {
+    useIdentity := pc.idpLoginURL != nil
+    switch {
+    case useIdentity:
+        return SessionDescription{}, errIdentityProviderNotImplemented
+    case pc.isClosed.Load():
+        return SessionDescription{}, &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
+    }
+
+    if options != nil && options.ICERestart {
+        if err := pc.iceTransport.restart(); err != nil {
+            return SessionDescription{}, err
+        }
+    }
+    
+    // Generate SDP and return offer...
+}
+```
+
+Example usage:
+
+```go
+// Create an offer
+offer, err := pc.CreateOffer(nil)
+if err != nil {
+    panic(err)
+}
+
+// Set local description
+if err = pc.SetLocalDescription(offer); err != nil {
+    panic(err)
+}
+
+// Send offer to remote peer via signaling channel
+sendToRemotePeer(offer)
+```
+
+<Tip>
+You can trigger an ICE restart by passing `&webrtc.OfferOptions{ICERestart: true}` to `CreateOffer()`.
+</Tip>
+
+### Creating an Answer
+
+```go peerconnection.go
+// CreateAnswer starts the PeerConnection and generates the localDescription
+func (pc *PeerConnection) CreateAnswer(options *AnswerOptions) (SessionDescription, error) {
+    remoteDesc := pc.RemoteDescription()
+    switch {
+    case remoteDesc == nil:
+        return SessionDescription{}, &rtcerr.InvalidStateError{Err: ErrNoRemoteDescription}
+    case pc.isClosed.Load():
+        return SessionDescription{}, &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
+    case pc.signalingState.Get() != SignalingStateHaveRemoteOffer &&
+         pc.signalingState.Get() != SignalingStateHaveLocalPranswer:
+        return SessionDescription{}, &rtcerr.InvalidStateError{Err: ErrIncorrectSignalingState}
+    }
+    
+    // Generate answer SDP...
+}
+```
+
+Example usage:
+
+```go
+// Receive offer from remote peer
+var offer webrtc.SessionDescription
+receiveFromRemotePeer(&offer)
+
+// Set remote description
+if err := pc.SetRemoteDescription(offer); err != nil {
+    panic(err)
+}
+
+// Create answer
+answer, err := pc.CreateAnswer(nil)
+if err != nil {
+    panic(err)
+}
+
+// Set local description
+if err = pc.SetLocalDescription(answer); err != nil {
+    panic(err)
+}
+
+// Send answer back to remote peer
+sendToRemotePeer(answer)
+```
+
+## Setting Descriptions
+
+### Setting Local Description
+
+```go peerconnection.go
+func (pc *PeerConnection) SetLocalDescription(desc SessionDescription) error {
+    if pc.isClosed.Load() {
+        return &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
+    }
+
+    haveLocalDescription := pc.currentLocalDescription != nil
+
+    // JSEP 5.4 - Allow empty SDP
+    if desc.SDP == "" {
+        switch desc.Type {
+        case SDPTypeAnswer, SDPTypePranswer:
+            desc.SDP = pc.lastAnswer
+        case SDPTypeOffer:
+            desc.SDP = pc.lastOffer
+        }
+    }
+    
+    // Parse and validate SDP...
+    // Update signaling state...
+    // Start ICE gathering...
+}
+```
+
+### Setting Remote Description
+
+```go peerconnection.go
+func (pc *PeerConnection) SetRemoteDescription(desc SessionDescription) error {
+    if pc.isClosed.Load() {
+        return &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
+    }
+
+    isRenegotiation := pc.currentRemoteDescription != nil
+
+    if _, err := desc.Unmarshal(); err != nil {
+        return err
+    }
+
+    if err := pc.setDescription(&desc, stateChangeOpSetRemote); err != nil {
+        return err
+    }
+    
+    // Extract ICE candidates from SDP...
+    // Start transports...
+}
+```
+
+<Warning>
+Always set the remote description before creating an answer. Attempting to create an answer without a remote offer will result in an error.
+</Warning>
+
+## Adding Tracks
+
+```go
+// Create a video track
+videoTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+// Add track to PeerConnection
+sender, err := pc.AddTrack(videoTrack)
+if err != nil {
+    panic(err)
+}
+
+// Read RTCP packets from sender
+go func() {
+    for {
+        packets, _, err := sender.ReadRTCP()
+        if err != nil {
+            return
+        }
+        // Handle RTCP feedback
+    }
+}()
+```
+
+## Receiving Tracks
+
+```go peerconnection.go
+pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+    fmt.Printf("Track received: kind=%s, id=%s\n", track.Kind(), track.ID())
+
+    // Read RTP packets
+    go func() {
+        buf := make([]byte, 1500)
+        for {
+            i, _, err := track.Read(buf)
+            if err != nil {
+                return
+            }
+            // Process RTP packet
+            processMedia(buf[:i])
+        }
+    }()
+})
+```
+
+From the source code:
+
+```go peerconnection.go
+func (pc *PeerConnection) onTrack(t *TrackRemote, r *RTPReceiver) {
+    pc.mu.RLock()
+    handler := pc.onTrackHandler
+    pc.mu.RUnlock()
+
+    pc.log.Debugf("got new track: %+v", t)
+    if t != nil {
+        if handler != nil {
+            go handler(t, r)
+        } else {
+            pc.log.Warnf("OnTrack unset, unable to handle incoming media streams")
+        }
+    }
+}
+```
+
+## Negotiation Needed
+
+Pion automatically detects when renegotiation is needed:
+
+```go peerconnection.go
+func (pc *PeerConnection) checkNegotiationNeeded() bool {
+    pc.mu.Lock()
+    defer pc.mu.Unlock()
+
+    localDesc := pc.currentLocalDescription
+    remoteDesc := pc.currentRemoteDescription
+
+    if localDesc == nil {
+        return true
+    }
+
+    // Check if we have data channels but no data channel in SDP
+    pc.sctpTransport.lock.Lock()
+    lenDataChannel := len(pc.sctpTransport.dataChannels)
+    pc.sctpTransport.lock.Unlock()
+
+    if lenDataChannel != 0 && haveDataChannel(localDesc) == nil {
+        return true
+    }
+
+    // Check all transceivers...
+    for _, transceiver := range pc.rtpTransceivers {
+        // Check if transceiver requires renegotiation
+    }
+    
+    return false
+}
+```
+
+Handle renegotiation:
+
+```go
+pc.OnNegotiationNeeded(func() {
+    fmt.Println("Renegotiation needed")
+    
+    // Create new offer
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return
+    }
+    
+    if err = pc.SetLocalDescription(offer); err != nil {
+        return
+    }
+    
+    // Send offer to remote peer
+    sendToRemotePeer(offer)
+})
+```
+
+## Configuration Updates
+
+```go peerconnection.go
+func (pc *PeerConnection) SetConfiguration(configuration Configuration) error {
+    if pc.isClosed.Load() {
+        return &rtcerr.InvalidStateError{Err: ErrConnectionClosed}
+    }
+
+    // Validate that immutable fields haven't changed
+    if len(configuration.Certificates) > 0 {
+        if len(configuration.Certificates) != len(pc.configuration.Certificates) {
+            return &rtcerr.InvalidModificationError{Err: ErrModifyingCertificates}
+        }
+    }
+    
+    // Update ICE servers
+    if pc.iceGatherer != nil {
+        if err := pc.iceGatherer.updateServers(configuration.ICEServers, pc.configuration.ICETransportPolicy); err != nil {
+            pc.log.Debugf("Could not update ICE gatherer servers: %v", err)
+        }
+    }
+    
+    pc.configuration.ICEServers = configuration.ICEServers
+    return nil
+}
+```
+
+<Note>
+Most configuration fields cannot be changed after the PeerConnection is created. Only ICE servers can be safely updated.
+</Note>
+
+## Closing Connections
+
+```go
+// Graceful close
+if err := pc.Close(); err != nil {
+    panic(err)
+}
+```
+
+Always close PeerConnections to free resources:
+
+```go
+defer func() {
+    if err := pc.Close(); err != nil {
+        log.Printf("Failed to close PeerConnection: %v", err)
+    }
+}()
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Signaling" href="/concepts/signaling">
+    Learn about SDP exchange and signaling protocols
+  </Card>
+  <Card title="ICE & Connectivity" href="/concepts/ice-and-connectivity">
+    Deep dive into ICE candidates and NAT traversal
+  </Card>
+</CardGroup>

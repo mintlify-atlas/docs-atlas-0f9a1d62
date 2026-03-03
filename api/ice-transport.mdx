@@ -1,0 +1,500 @@
+---
+title: 'ICETransport'
+description: 'Provides access to ICE transport information for WebRTC packet transmission'
+---
+
+## Overview
+
+The `ICETransport` allows an application access to information about the ICE transport over which packets are sent and received.
+
+<Note>
+This is part of the ORTC API. It is not meant to be used together with the basic WebRTC API.
+</Note>
+
+## Type Definition
+
+```go icetransport.go
+type ICETransport struct {
+    // Contains internal state management for ICE transport
+}
+```
+
+## Constructor
+
+### NewICETransport
+
+Creates a new ICETransport with the given ICEGatherer.
+
+```go icetransport.go
+func NewICETransport(gatherer *ICEGatherer, loggerFactory logging.LoggerFactory) *ICETransport
+```
+
+<ParamField path="gatherer" type="*ICEGatherer" required>
+  The ICE gatherer to use for candidate gathering
+</ParamField>
+
+<ParamField path="loggerFactory" type="logging.LoggerFactory" required>
+  Factory for creating loggers
+</ParamField>
+
+<ResponseField name="return" type="*ICETransport">
+  Returns a new ICETransport instance
+</ResponseField>
+
+**Example:**
+
+```go
+api := webrtc.NewAPI()
+gatherer, _ := api.NewICEGatherer(webrtc.ICEGatherOptions{})
+transport := webrtc.NewICETransport(gatherer, api.LoggerFactory)
+```
+
+## Methods
+
+### Start
+
+Starts incoming connectivity checks based on the configured role.
+
+```go icetransport.go
+func (t *ICETransport) Start(
+    gatherer *ICEGatherer, 
+    params ICEParameters, 
+    role *ICERole,
+) error
+```
+
+<ParamField path="gatherer" type="*ICEGatherer">
+  Optional ICE gatherer to use (can be nil to use the existing one)
+</ParamField>
+
+<ParamField path="params" type="ICEParameters" required>
+  Remote ICE parameters (username fragment and password)
+  
+  <Expandable title="ICEParameters structure">
+    <ResponseField name="UsernameFragment" type="string">
+      ICE username fragment from remote peer
+    </ResponseField>
+    <ResponseField name="Password" type="string">
+      ICE password from remote peer
+    </ResponseField>
+    <ResponseField name="ICELite" type="bool">
+      Whether remote peer is using ICE-lite
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="role" type="*ICERole">
+  ICE role (controlling or controlled). If nil, defaults to controlled.
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if the transport cannot be started
+</ResponseField>
+
+**Example:**
+
+```go
+role := webrtc.ICERoleControlling
+err := transport.Start(nil, remoteParams, &role)
+if err != nil {
+    panic(err)
+}
+```
+
+### Stop
+
+Irreversibly stops the ICETransport.
+
+```go icetransport.go
+func (t *ICETransport) Stop() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if stopping fails
+</ResponseField>
+
+**Example:**
+
+```go
+err := transport.Stop()
+if err != nil {
+    panic(err)
+}
+```
+
+### GracefulStop
+
+Irreversibly stops the ICETransport and waits for goroutines to complete.
+
+<Warning>
+This is only safe to call outside of ICETransport callbacks or if in a callback, in its own goroutine.
+</Warning>
+
+```go icetransport.go
+func (t *ICETransport) GracefulStop() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if stopping fails
+</ResponseField>
+
+**Example:**
+
+```go
+go func() {
+    err := transport.GracefulStop()
+    if err != nil {
+        log.Printf("Error stopping transport: %v", err)
+    }
+}()
+```
+
+### State
+
+Returns the current ICE transport state.
+
+```go icetransport.go
+func (t *ICETransport) State() ICETransportState
+```
+
+<ResponseField name="return" type="ICETransportState">
+  The current state (New, Checking, Connected, Completed, Failed, Disconnected, Closed)
+</ResponseField>
+
+**Example:**
+
+```go
+state := transport.State()
+fmt.Printf("Transport state: %s\n", state)
+```
+
+### Role
+
+Returns the current role of the ICE transport.
+
+```go icetransport.go
+func (t *ICETransport) Role() ICERole
+```
+
+<ResponseField name="return" type="ICERole">
+  The current ICE role (Controlling or Controlled)
+</ResponseField>
+
+**Example:**
+
+```go
+role := transport.Role()
+fmt.Printf("ICE role: %s\n", role)
+```
+
+### GetLocalParameters
+
+Returns an ICEParameters object uniquely identifying the local peer.
+
+```go icetransport.go
+func (t *ICETransport) GetLocalParameters() (ICEParameters, error)
+```
+
+<ResponseField name="return" type="ICEParameters, error">
+  Returns the local ICE parameters or an error
+</ResponseField>
+
+**Example:**
+
+```go
+params, err := transport.GetLocalParameters()
+if err != nil {
+    panic(err)
+}
+fmt.Printf("Local ICE params: %+v\n", params)
+```
+
+### GetRemoteParameters
+
+Returns an ICEParameters object uniquely identifying the remote peer.
+
+```go icetransport.go
+func (t *ICETransport) GetRemoteParameters() (ICEParameters, error)
+```
+
+<ResponseField name="return" type="ICEParameters, error">
+  Returns the remote ICE parameters or an error
+</ResponseField>
+
+**Example:**
+
+```go
+params, err := transport.GetRemoteParameters()
+if err != nil {
+    panic(err)
+}
+fmt.Printf("Remote ICE params: %+v\n", params)
+```
+
+### GetSelectedCandidatePair
+
+Returns the selected candidate pair on which packets are sent.
+
+```go icetransport.go
+func (t *ICETransport) GetSelectedCandidatePair() (*ICECandidatePair, error)
+```
+
+<ResponseField name="return" type="*ICECandidatePair, error">
+  Returns the selected candidate pair or nil if no pair is selected
+  
+  <Expandable title="ICECandidatePair structure">
+    <ResponseField name="Local" type="*ICECandidate">
+      The local ICE candidate
+    </ResponseField>
+    <ResponseField name="Remote" type="*ICECandidate">
+      The remote ICE candidate
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```go
+pair, err := transport.GetSelectedCandidatePair()
+if err != nil {
+    panic(err)
+}
+if pair != nil {
+    fmt.Printf("Selected pair - Local: %s, Remote: %s\n", 
+        pair.Local.String(), pair.Remote.String())
+}
+```
+
+### GetSelectedCandidatePairStats
+
+Returns statistics for the selected candidate pair.
+
+```go icetransport.go
+func (t *ICETransport) GetSelectedCandidatePairStats() (ICECandidatePairStats, bool)
+```
+
+<ResponseField name="return" type="ICECandidatePairStats, bool">
+  Returns stats and true if available, or empty stats and false if not available
+</ResponseField>
+
+**Example:**
+
+```go
+stats, ok := transport.GetSelectedCandidatePairStats()
+if ok {
+    fmt.Printf("Bytes sent: %d, Bytes received: %d\n", 
+        stats.BytesSent, stats.BytesReceived)
+}
+```
+
+### AddRemoteCandidate
+
+Adds a candidate associated with the remote ICETransport.
+
+```go icetransport.go
+func (t *ICETransport) AddRemoteCandidate(remoteCandidate *ICECandidate) error
+```
+
+<ParamField path="remoteCandidate" type="*ICECandidate">
+  The remote ICE candidate to add (can be nil to signal end-of-candidates)
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if the candidate cannot be added
+</ResponseField>
+
+**Example:**
+
+```go
+err := transport.AddRemoteCandidate(candidate)
+if err != nil {
+    panic(err)
+}
+```
+
+### SetRemoteCandidates
+
+Sets the sequence of candidates associated with the remote ICETransport.
+
+```go icetransport.go
+func (t *ICETransport) SetRemoteCandidates(remoteCandidates []ICECandidate) error
+```
+
+<ParamField path="remoteCandidates" type="[]ICECandidate" required>
+  Slice of remote ICE candidates to set
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if candidates cannot be set
+</ResponseField>
+
+**Example:**
+
+```go
+err := transport.SetRemoteCandidates(remoteCandidates)
+if err != nil {
+    panic(err)
+}
+```
+
+### OnConnectionStateChange
+
+Sets a handler that fires when the ICE connection state changes.
+
+```go icetransport.go
+func (t *ICETransport) OnConnectionStateChange(f func(ICETransportState))
+```
+
+<ParamField path="f" type="func(ICETransportState)" required>
+  Callback function that receives state change notifications
+</ParamField>
+
+**Example:**
+
+```go
+transport.OnConnectionStateChange(func(state webrtc.ICETransportState) {
+    fmt.Printf("ICE transport state changed to: %s\n", state)
+})
+```
+
+### OnSelectedCandidatePairChange
+
+Sets a handler invoked when a new ICE candidate pair is selected.
+
+```go icetransport.go
+func (t *ICETransport) OnSelectedCandidatePairChange(f func(*ICECandidatePair))
+```
+
+<ParamField path="f" type="func(*ICECandidatePair)" required>
+  Callback function that receives the selected candidate pair
+</ParamField>
+
+**Example:**
+
+```go
+transport.OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+    fmt.Printf("Selected candidate pair changed\n")
+    fmt.Printf("  Local: %s\n", pair.Local.String())
+    fmt.Printf("  Remote: %s\n", pair.Remote.String())
+})
+```
+
+### Stats
+
+Reports the current statistics of the ICETransport.
+
+```go icetransport.go
+func (t *ICETransport) Stats() TransportStats
+```
+
+<ResponseField name="return" type="TransportStats">
+  Returns transport statistics including bytes sent and received
+  
+  <Expandable title="TransportStats structure">
+    <ResponseField name="Timestamp" type="StatsTimestamp">
+      Timestamp of the stats
+    </ResponseField>
+    <ResponseField name="Type" type="StatsType">
+      Stats type (always StatsTypeTransport)
+    </ResponseField>
+    <ResponseField name="ID" type="string">
+      Stats identifier
+    </ResponseField>
+    <ResponseField name="BytesSent" type="uint64">
+      Number of bytes sent
+    </ResponseField>
+    <ResponseField name="BytesReceived" type="uint64">
+      Number of bytes received
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```go
+stats := transport.Stats()
+fmt.Printf("Bytes sent: %d, received: %d\n", 
+    stats.BytesSent, stats.BytesReceived)
+```
+
+## States
+
+The ICETransport can be in one of the following states:
+
+- **ICETransportStateNew**: Initial state
+- **ICETransportStateChecking**: Checking candidate pairs
+- **ICETransportStateConnected**: Successfully connected
+- **ICETransportStateCompleted**: Completed gathering and checks
+- **ICETransportStateFailed**: Failed to establish connection
+- **ICETransportStateDisconnected**: Temporarily disconnected
+- **ICETransportStateClosed**: Transport has been closed
+
+## Usage Example
+
+<CodeGroup>
+```go Complete Example
+package main
+
+import (
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create API
+    api := webrtc.NewAPI()
+    
+    // Create ICE gatherer
+    gatherer, err := api.NewICEGatherer(webrtc.ICEGatherOptions{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    })
+    if err != nil {
+        panic(err)
+    }
+    
+    // Create ICE transport
+    transport := webrtc.NewICETransport(gatherer, api.LoggerFactory)
+    
+    // Set up event handlers
+    transport.OnConnectionStateChange(func(state webrtc.ICETransportState) {
+        fmt.Printf("ICE transport state: %s\n", state)
+    })
+    
+    transport.OnSelectedCandidatePairChange(func(pair *webrtc.ICECandidatePair) {
+        fmt.Printf("Selected pair: %s <-> %s\n", 
+            pair.Local.String(), pair.Remote.String())
+    })
+    
+    // Gather candidates
+    if err = gatherer.Gather(); err != nil {
+        panic(err)
+    }
+    
+    // Start transport with remote parameters
+    // (remoteParams would come from signaling)
+    role := webrtc.ICERoleControlling
+    err = transport.Start(nil, remoteParams, &role)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Add remote candidates as they arrive
+    // transport.AddRemoteCandidate(remoteCandidate)
+    
+    // Get stats periodically
+    stats := transport.Stats()
+    fmt.Printf("Stats: %+v\n", stats)
+    
+    // Clean up
+    defer transport.Stop()
+}
+```
+</CodeGroup>
+
+## See Also
+
+- [ICEGatherer](/api/ice-gatherer) - Gathers ICE candidates
+- [DTLSTransport](/api/dtls-transport) - Handles DTLS encryption over ICE
+- [PeerConnection](/api/peer-connection) - High-level WebRTC API

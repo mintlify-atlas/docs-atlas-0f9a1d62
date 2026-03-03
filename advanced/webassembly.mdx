@@ -1,0 +1,578 @@
+---
+title: 'WebAssembly Support'
+description: 'Use Pion WebRTC in the browser via WebAssembly'
+---
+
+## Overview
+
+Pion WebRTC can be compiled to WebAssembly (WASM) and run in web browsers. This allows you to write both client and server code in Go, using the same API on both sides.
+
+<Note>
+  When compiled to WASM, Pion WebRTC acts as a wrapper around the browser's native WebRTC implementation. Not all features available in the native Go version are available in WASM.
+</Note>
+
+## Building for WebAssembly
+
+### Basic Build
+
+```bash build.sh
+# Build for WebAssembly
+GOOS=js GOARCH=wasm go build -o main.wasm main.go
+```
+
+### Copy WASM Exec
+
+You need the wasm_exec.js file from your Go installation:
+
+```bash copy-wasm-exec.sh
+cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" .
+```
+
+## HTML Setup
+
+Create an HTML file to load your WASM module:
+
+```html index.html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pion WebRTC WASM</title>
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(
+            fetch("main.wasm"), 
+            go.importObject
+        ).then((result) => {
+            go.run(result.instance);
+        });
+    </script>
+</head>
+<body>
+    <h1>Pion WebRTC in WebAssembly</h1>
+    <div id="output"></div>
+</body>
+</html>
+```
+
+## Basic WASM Example
+
+```go main.go
+//go:build js && wasm
+// +build js,wasm
+
+package main
+
+import (
+    "fmt"
+    "syscall/js"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // This runs in the browser
+    fmt.Println("Pion WebRTC WASM initialized")
+    
+    // Create PeerConnection
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    
+    // Set up handlers
+    peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+        fmt.Printf("ICE Connection State: %s\n", state)
+    })
+    
+    // Keep the program running
+    select {}
+}
+```
+
+## Build Tags
+
+When writing code for WebAssembly, use build tags:
+
+```go build-tags.go
+//go:build js && wasm
+// +build js,wasm
+
+package main
+
+// This code only compiles for WASM
+```
+
+For native Go code:
+
+```go native-tags.go
+//go:build !js
+// +build !js
+
+package main
+
+// This code compiles for all platforms except WASM
+```
+
+From [api_js.go:4-5](https://github.com/pion/webrtc/blob/master/api_js.go:4-5).
+
+## API Differences
+
+The WASM API is more limited than the native Go API:
+
+### Available in WASM
+
+<Steps>
+  <Step title="PeerConnection Creation">
+    `NewPeerConnection` works the same way
+  </Step>
+  
+  <Step title="Basic Configuration">
+    ICE servers and basic configuration options
+  </Step>
+  
+  <Step title="Data Channels">
+    Create and use data channels, including detaching
+  </Step>
+  
+  <Step title="Event Handlers">
+    OnICECandidate, OnConnectionStateChange, etc.
+  </Step>
+</Steps>
+
+### Not Available in WASM
+
+<Warning>
+  These features are only available in native Go builds:
+</Warning>
+
+- MediaEngine configuration
+- InterceptorRegistry
+- Most SettingEngine options
+- Custom network interfaces
+- UDP/TCP mux
+- Custom logging (browser console is used)
+
+## SettingEngine in WASM
+
+The WASM SettingEngine has limited functionality:
+
+```go wasm-setting-engine.go
+//go:build js && wasm
+
+package main
+
+import "github.com/pion/webrtc/v4"
+
+func main() {
+    s := webrtc.SettingEngine{}
+    
+    // Only data channel detaching is supported
+    s.DetachDataChannels()
+    
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+    
+    defer peerConnection.Close()
+}
+```
+
+From [settingengine_js.go:9-24](https://github.com/pion/webrtc/blob/master/settingengine_js.go:9-24).
+
+## Data Channel Example
+
+```go datachannel.go
+//go:build js && wasm
+
+package main
+
+import (
+    "fmt"
+    "syscall/js"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create PeerConnection
+    peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    
+    // Create data channel
+    dataChannel, err := peerConnection.CreateDataChannel("data", nil)
+    if err != nil {
+        panic(err)
+    }
+    
+    // Handle data channel open
+    dataChannel.OnOpen(func() {
+        fmt.Println("Data channel opened")
+        
+        // Send a message
+        err := dataChannel.SendText("Hello from WASM!")
+        if err != nil {
+            fmt.Printf("Send error: %v\n", err)
+        }
+    })
+    
+    // Handle incoming messages
+    dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+        fmt.Printf("Received: %s\n", string(msg.Data))
+    })
+    
+    // Handle data channel close
+    dataChannel.OnClose(func() {
+        fmt.Println("Data channel closed")
+    })
+    
+    select {}
+}
+```
+
+## Detached Data Channels
+
+Detach data channels for direct I/O access:
+
+```go detached.go
+//go:build js && wasm
+
+package main
+
+import (
+    "fmt"
+    "io"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    s := webrtc.SettingEngine{}
+    s.DetachDataChannels()
+    
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+    defer peerConnection.Close()
+    
+    dataChannel, _ := peerConnection.CreateDataChannel("data", nil)
+    
+    dataChannel.OnOpen(func() {
+        fmt.Println("Data channel opened, detaching...")
+        
+        // Detach the data channel
+        raw, err := dataChannel.Detach()
+        if err != nil {
+            panic(err)
+        }
+        
+        // Now you have a ReadWriteCloser
+        go func() {
+            buf := make([]byte, 1024)
+            for {
+                n, err := raw.Read(buf)
+                if err != nil {
+                    if err != io.EOF {
+                        fmt.Printf("Read error: %v\n", err)
+                    }
+                    return
+                }
+                fmt.Printf("Read %d bytes: %s\n", n, string(buf[:n]))
+            }
+        }()
+        
+        // Write data
+        raw.Write([]byte("Hello from detached channel"))
+    })
+    
+    select {}
+}
+```
+
+## Interacting with JavaScript
+
+You can interact with JavaScript from your WASM code:
+
+```go js-interop.go
+//go:build js && wasm
+
+package main
+
+import (
+    "fmt"
+    "syscall/js"
+    "github.com/pion/webrtc/v4"
+)
+
+func updateUI(message string) {
+    // Get DOM element
+    document := js.Global().Get("document")
+    output := document.Call("getElementById", "output")
+    
+    // Update content
+    output.Set("innerHTML", message)
+}
+
+func main() {
+    // Expose Go function to JavaScript
+    js.Global().Set("createConnection", js.FuncOf(func(this js.Value, args []js.Value) interface{} {
+        go func() {
+            peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+            if err != nil {
+                updateUI(fmt.Sprintf("Error: %v", err))
+                return
+            }
+            defer peerConnection.Close()
+            
+            peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+                updateUI(fmt.Sprintf("ICE State: %s", state))
+            })
+            
+            updateUI("PeerConnection created!")
+        }()
+        return nil
+    }))
+    
+    updateUI("WASM loaded - call createConnection() from JavaScript")
+    
+    select {}
+}
+```
+
+In your HTML:
+
+```html call-from-js.html
+<button onclick="createConnection()">Create Connection</button>
+<div id="output"></div>
+```
+
+## Serving WASM
+
+You need a web server to serve WASM files:
+
+```go server.go
+package main
+
+import (
+    "log"
+    "net/http"
+)
+
+func main() {
+    // Serve current directory
+    fs := http.FileServer(http.Dir("."))
+    http.Handle("/", fs)
+    
+    log.Println("Serving on http://localhost:8080")
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+```
+
+Run the server:
+
+```bash serve.sh
+go run server.go
+```
+
+Then open http://localhost:8080 in your browser.
+
+## Build Script
+
+Create a build script for convenience:
+
+```bash build.sh
+#!/bin/bash
+
+echo "Building WASM..."
+GOOS=js GOARCH=wasm go build -o main.wasm main.go
+
+echo "Copying wasm_exec.js..."
+cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" .
+
+echo "Build complete!"
+echo "Run: go run server.go"
+```
+
+## Debugging
+
+### Browser Console
+
+All `fmt.Println` calls appear in the browser console:
+
+```go debug.go
+fmt.Println("This appears in browser console")
+fmt.Printf("ICE State: %s\n", state)
+```
+
+### Source Maps
+
+Build with debug information:
+
+```bash debug-build.sh
+GOOS=js GOARCH=wasm go build -gcflags="all=-N -l" -o main.wasm main.go
+```
+
+### Check WASM Support
+
+```go check-wasm.go
+//go:build js && wasm
+
+package main
+
+import (
+    "fmt"
+    "syscall/js"
+)
+
+func main() {
+    fmt.Println("WASM is supported!")
+    fmt.Printf("User Agent: %s\n", js.Global().Get("navigator").Get("userAgent").String())
+    fmt.Printf("Go version: %s\n", js.Global().Get("Go").Get("version").String())
+}
+```
+
+## Limitations
+
+<Warning>
+  Be aware of these limitations when using WASM:
+</Warning>
+
+1. **No Media Engine**: Can't configure codecs directly
+2. **No Interceptors**: Can't intercept RTP/RTCP packets
+3. **Limited SettingEngine**: Only data channel detaching supported
+4. **Browser Restrictions**: Subject to browser WebRTC policies
+5. **Performance**: WASM may be slower than native code
+6. **Bundle Size**: WASM files can be large (several MB)
+
+## Best Practices
+
+<Steps>
+  <Step title="Use Build Tags">
+    Separate WASM and native code with build tags
+  </Step>
+  
+  <Step title="Minimize WASM Size">
+    Only include necessary code in WASM builds
+  </Step>
+  
+  <Step title="Handle Errors Gracefully">
+    WASM errors appear in browser console - make them informative
+  </Step>
+  
+  <Step title="Test in Multiple Browsers">
+    Different browsers may behave differently
+  </Step>
+</Steps>
+
+## Complete Example
+
+<Accordion title="Full WASM Application">
+
+**main.go:**
+```go
+//go:build js && wasm
+
+package main
+
+import (
+    "fmt"
+    "syscall/js"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    fmt.Println("Pion WebRTC WASM Example")
+    
+    js.Global().Set("startWebRTC", js.FuncOf(startWebRTC))
+    
+    select {}
+}
+
+func startWebRTC(this js.Value, args []js.Value) interface{} {
+    go func() {
+        config := webrtc.Configuration{
+            ICEServers: []webrtc.ICEServer{
+                {URLs: []string{"stun:stun.l.google.com:19302"}},
+            },
+        }
+        
+        pc, err := webrtc.NewPeerConnection(config)
+        if err != nil {
+            fmt.Printf("Error: %v\n", err)
+            return
+        }
+        defer pc.Close()
+        
+        dc, _ := pc.CreateDataChannel("test", nil)
+        
+        dc.OnOpen(func() {
+            fmt.Println("Data channel opened!")
+            dc.SendText("Hello from WASM!")
+        })
+        
+        dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf("Received: %s\n", string(msg.Data))
+        })
+        
+        pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+            fmt.Printf("ICE State: %s\n", state)
+        })
+    }()
+    
+    return nil
+}
+```
+
+**index.html:**
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pion WASM Example</title>
+    <script src="wasm_exec.js"></script>
+    <script>
+        const go = new Go();
+        WebAssembly.instantiateStreaming(
+            fetch("main.wasm"),
+            go.importObject
+        ).then((result) => {
+            go.run(result.instance);
+        });
+    </script>
+</head>
+<body>
+    <h1>Pion WebRTC WASM</h1>
+    <button onclick="startWebRTC()">Start WebRTC</button>
+    <p>Check console for output</p>
+</body>
+</html>
+```
+
+**Build and run:**
+```bash
+GOOS=js GOARCH=wasm go build -o main.wasm main.go
+cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" .
+go run server.go
+```
+
+</Accordion>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="SettingEngine" icon="gear" href="./setting-engine">
+    Limited settings available in WASM
+  </Card>
+  <Card title="Data Channels" icon="comments" href="../guides/data-channels">
+    Data channel usage guide
+  </Card>
+</CardGroup>

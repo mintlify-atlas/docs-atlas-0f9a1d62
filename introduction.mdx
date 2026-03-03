@@ -1,0 +1,221 @@
+---
+title: Pion WebRTC
+description: A pure Go implementation of the WebRTC API
+---
+
+<img
+  className="block dark:hidden"
+  src="https://raw.githubusercontent.com/pion/webrtc/master/.github/pion-gopher-webrtc.png"
+  alt="Pion WebRTC Hero Light"
+  height="250"
+/>
+<img
+  className="hidden dark:block"
+  src="https://raw.githubusercontent.com/pion/webrtc/master/.github/pion-gopher-webrtc.png"
+  alt="Pion WebRTC Hero Dark"
+  height="250"
+/>
+
+# Welcome to Pion WebRTC
+
+Pion WebRTC is a **pure Go implementation** of the WebRTC API. Build real-time communication applications with the power and simplicity of Go.
+
+<CardGroup cols={2}>
+  <Card
+    title="Installation"
+    icon="download"
+    href="/installation"
+  >
+    Get started with Pion WebRTC in minutes using Go modules
+  </Card>
+  <Card
+    title="Quick Start"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Build your first WebRTC data channel application
+  </Card>
+  <Card
+    title="Examples"
+    icon="code"
+    href="https://github.com/pion/webrtc/tree/master/examples"
+  >
+    Explore 30+ working examples from simple to advanced
+  </Card>
+  <Card
+    title="API Reference"
+    icon="book"
+    href="https://pkg.go.dev/github.com/pion/webrtc/v4"
+  >
+    Complete API documentation with detailed comments
+  </Card>
+</CardGroup>
+
+## Why Pion WebRTC?
+
+Pion WebRTC enables you to build WebRTC applications outside the browser with the reliability and performance of Go.
+
+### Pure Go Implementation
+
+<CardGroup cols={3}>
+  <Card icon="golang" title="No CGo Required">
+    Written entirely in Go with zero C dependencies. Build once, run anywhere.
+  </Card>
+  <Card icon="microchip" title="Cross-Platform">
+    Supports Windows, macOS, Linux, FreeBSD, iOS, Android, and WebAssembly.
+  </Card>
+  <Card icon="gauge-high" title="Fast Builds">
+    Build the entire library in under 1 second. Run full test suite in ~77 seconds.
+  </Card>
+</CardGroup>
+
+### Standards Compliant
+
+<Note>
+Pion implements the official W3C [webrtc-pc](https://w3c.github.io/webrtc-pc/) and [webrtc-stats](https://www.w3.org/TR/webrtc-stats/) specifications.
+</Note>
+
+If you know how to use WebRTC in the browser, you already know how to use Pion WebRTC. The API mirrors the JavaScript WebRTC API for a familiar developer experience.
+
+## Key Features
+
+### PeerConnection API
+
+- **Full WebRTC API** - Complete implementation of PeerConnection, DataChannels, and Media APIs
+- **Send/Receive Media** - Audio and video streaming with codec support for Opus, VP8, VP9, H264, AV1
+- **Data Channels** - Ordered/unordered, reliable/unreliable messaging
+- **Renegotiation** - Dynamic track and data channel management
+- **Plan-B & Unified Plan** - Support for both SDP semantics
+- **SettingEngine** - Pion-specific extensions for advanced control
+
+### Connectivity
+
+<Steps>
+  <Step title="Full ICE Agent">
+    Complete Interactive Connectivity Establishment with ICE restart and Trickle ICE support
+  </Step>
+  <Step title="STUN/TURN Support">
+    Built-in STUN support and TURN support via UDP, TCP, DTLS, and TLS
+  </Step>
+  <Step title="mDNS Candidates">
+    Local network discovery without STUN servers
+  </Step>
+</Steps>
+
+### Media Capabilities
+
+```go
+// Direct RTP/RTCP access for custom processing
+track, err := webrtc.NewTrackLocalStaticRTP(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+```
+
+- **Codec Support** - Opus, PCM, H264, VP8, VP9, AV1 packetizers
+- **Container Formats** - IVF, Ogg, H264, and Matroska readers/writers
+- **Advanced Features** - Simulcast, SVC, NACK, Sender/Receiver Reports, TWCC
+- **Easy Integration** - Works with x264, libvpx, GStreamer, and FFmpeg
+
+### Security
+
+<Warning>
+All connections are encrypted by default using industry-standard protocols.
+</Warning>
+
+- **DTLS v1.2** - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 and TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA
+- **SRTP** - SRTP_AEAD_AES_256_GCM and SRTP_AES128_CM_HMAC_SHA1_80
+- **Hardware Acceleration** - Available for GCM cipher suites
+
+## Design Principles
+
+### Portable
+Written in pure Go with no C dependencies. If Go runs on your platform, Pion WebRTC will too. Cross-compile with a single `go build` command.
+
+### Flexible
+Pion leaves decisions to you. Choose your own logging library, media sources, and signaling mechanism. We provide the transport layer, you provide everything else.
+
+### Simple API
+The API mirrors the browser WebRTC API. Your WebRTC knowledge transfers directly from browser to server.
+
+### Bring Your Own Media
+Pion doesn't make assumptions about your media sources. Use FFmpeg, GStreamer, camera devices, files, or anything else. Pion handles the transport.
+
+### Safe & Tested
+Built with Go's safety guarantees and concurrency primitives. Every commit is tested, and the codebase maintains high test coverage.
+
+### Readable
+Code references RFCs with links to specifications. Learn WebRTC internals while using the library.
+
+## Use Cases
+
+<Tip>
+Pion WebRTC powers real-world applications across industries:
+</Tip>
+
+- **Video Conferencing** - Build scalable conferencing platforms with server-side processing
+- **IoT & Robotics** - Stream camera feeds from embedded devices directly to browsers
+- **Broadcasting** - Send video files to multiple browsers with perfect synchronization
+- **Secure Communications** - Create peer-to-peer encrypted data channels between servers
+- **Recording & Processing** - Capture and process audio/video streams server-side
+- **Remote Control** - Control robots and stream telemetry in real-time
+
+## Getting Help
+
+<CardGroup cols={2}>
+  <Card
+    title="WebRTC for the Curious"
+    icon="book-open"
+    href="https://webrtcforthecurious.com"
+  >
+    Deep dive into WebRTC protocols: ICE, SCTP, DTLS, SRTP, and more
+  </Card>
+  <Card
+    title="Discord Community"
+    icon="discord"
+    href="https://discord.gg/PngbdqpFbt"
+  >
+    Active community ready to help with any WebRTC questions
+  </Card>
+  <Card
+    title="FAQ"
+    icon="question"
+    href="https://github.com/pion/webrtc/wiki/FAQ"
+  >
+    Common questions and answers about Pion WebRTC
+  </Card>
+  <Card
+    title="GitHub Issues"
+    icon="github"
+    href="https://github.com/pion/webrtc/issues"
+  >
+    Report bugs, request features, and track development
+  </Card>
+</CardGroup>
+
+## What's New in v4
+
+<Note>
+Pion WebRTC v4.0.0 brings performance improvements, new features, and API refinements.
+</Note>
+
+Check the [release notes](https://github.com/pion/webrtc/wiki/Release-WebRTC@v4.0.0) for details on new features and breaking changes. If you're not ready to upgrade, v3 releases are still available via tags.
+
+## Community & Support
+
+Pion exists because of individual contributions from developers worldwide. Join our community:
+
+- **Discord** - [discord.gg/PngbdqpFbt](https://discord.gg/PngbdqpFbt)
+- **Bluesky** - [@pion.ly](https://bsky.app/profile/pion.ly)
+- **GitHub** - [github.com/pion/webrtc](https://github.com/pion/webrtc)
+
+Need commercial support? Contact us at [team@pion.ly](mailto:team@pion.ly)
+
+<Card
+  title="Ready to Build?"
+  icon="rocket"
+  href="/installation"
+>
+  Install Pion WebRTC and create your first application
+</Card>

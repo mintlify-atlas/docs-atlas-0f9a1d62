@@ -1,0 +1,202 @@
+---
+title: Migration Guide to v4
+description: Learn how to migrate your Pion WebRTC application from v3 to v4
+---
+
+## Overview
+
+Pion WebRTC v4.0.0 introduces several improvements and breaking changes. This guide will help you migrate your existing v3 applications to v4.
+
+<Note>
+For detailed release notes, visit the [v4.0.0 release page](https://github.com/pion/webrtc/wiki/Release-WebRTC@v4.0.0) on GitHub.
+</Note>
+
+## Import Path Changes
+
+The most significant change in v4 is the updated import path.
+
+### Update Import Statements
+
+Change all imports from v3 to v4:
+
+```go
+// Old (v3)
+import "github.com/pion/webrtc/v3"
+
+// New (v4)
+import "github.com/pion/webrtc/v4"
+```
+
+### Update go.mod
+
+Update your `go.mod` file to use v4:
+
+```bash
+go get github.com/pion/webrtc/v4@latest
+```
+
+Make sure to enable Go Modules:
+
+```bash
+export GO111MODULE=on
+```
+
+## Dependency Updates
+
+Pion WebRTC v4 updates several core dependencies. The following Pion packages have been updated:
+
+<CardGroup cols={2}>
+  <Card title="ICE" icon="snowflake">
+    Updated to `github.com/pion/ice/v4`
+  </Card>
+  <Card title="DTLS" icon="lock">
+    Updated to `github.com/pion/dtls/v3`
+  </Card>
+  <Card title="SRTP" icon="shield">
+    Updated to `github.com/pion/srtp/v3`
+  </Card>
+  <Card title="Transport" icon="truck">
+    Updated to `github.com/pion/transport/v4`
+  </Card>
+</CardGroup>
+
+## API Changes
+
+While Pion maintains API compatibility where possible, some changes may require updates to your code.
+
+### SettingEngine Updates
+
+If you use the `SettingEngine` for custom configurations, review your settings as some methods may have updated signatures or behaviors.
+
+```go
+api := webrtc.NewAPI(
+    webrtc.WithSettingEngine(settingEngine),
+)
+```
+
+### Error Handling
+
+Error types may have changed. Review your error handling code:
+
+```go
+if err != nil {
+    // Check error types if you're doing type assertions
+    // Some error types may have been updated
+}
+```
+
+## Common Migration Issues
+
+<AccordionGroup>
+  <Accordion title="Build errors after updating imports">
+    Make sure you've updated all import paths throughout your codebase:
+    
+    ```bash
+    # Find all v3 imports
+    grep -r "github.com/pion/webrtc/v3" .
+    
+    # Replace with v4
+    find . -type f -name "*.go" -exec sed -i 's|github.com/pion/webrtc/v3|github.com/pion/webrtc/v4|g' {} +
+    ```
+  </Accordion>
+
+  <Accordion title="Dependency conflicts">
+    Clean your module cache and update dependencies:
+    
+    ```bash
+    go clean -modcache
+    go mod tidy
+    go get -u ./...
+    ```
+  </Accordion>
+
+  <Accordion title="Type compatibility issues">
+    If you're using custom types or interfaces, ensure they're compatible with v4:
+    
+    - Review the [GoDoc](https://pkg.go.dev/github.com/pion/webrtc/v4) for updated type definitions
+    - Check that your custom implementations satisfy updated interfaces
+  </Accordion>
+</AccordionGroup>
+
+## Testing Your Migration
+
+<Steps>
+  <Step title="Update dependencies">
+    Update all Pion packages and run `go mod tidy`
+  </Step>
+  
+  <Step title="Fix compilation errors">
+    Address any compilation errors from API changes
+  </Step>
+  
+  <Step title="Run tests">
+    Execute your test suite to ensure functionality
+    
+    ```bash
+    go test ./...
+    ```
+  </Step>
+  
+  <Step title="Integration testing">
+    Test your application end-to-end with real WebRTC connections
+  </Step>
+</Steps>
+
+## Benefits of v4
+
+Upgrading to v4 provides several advantages:
+
+- **Improved Performance**: Optimized packet processing and memory usage
+- **Enhanced Stability**: Bug fixes and stability improvements
+- **Better Standards Compliance**: Updated to latest WebRTC specifications
+- **Dependency Updates**: Latest versions of core Pion libraries
+- **Go Version Support**: Support for newer Go versions
+
+## Rollback Strategy
+
+If you encounter issues during migration:
+
+<Warning>
+Always test migrations in a development environment before deploying to production.
+</Warning>
+
+### Rolling Back
+
+To rollback to v3:
+
+```bash
+go get github.com/pion/webrtc/v3@latest
+go mod tidy
+```
+
+Revert your import statements:
+
+```bash
+find . -type f -name "*.go" -exec sed -i 's|github.com/pion/webrtc/v4|github.com/pion/webrtc/v3|g' {} +
+```
+
+## Getting Help
+
+If you need assistance with migration:
+
+- Join the [Pion Discord](https://discord.gg/PngbdqpFbt) community
+- Check the [GitHub Discussions](https://github.com/pion/webrtc/discussions)
+- Review [example applications](https://github.com/pion/example-webrtc-applications) updated for v4
+- Consult the [FAQ](/resources/faq) for common questions
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Examples" icon="code" href="https://github.com/pion/webrtc/tree/master/examples">
+    Explore updated examples using v4
+  </Card>
+  <Card title="API Reference" icon="book" href="https://pkg.go.dev/github.com/pion/webrtc/v4">
+    Browse the complete v4 API documentation
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/resources/troubleshooting">
+    Common issues and solutions
+  </Card>
+  <Card title="Community" icon="users" href="/resources/community">
+    Get help from the Pion community
+  </Card>
+</CardGroup>

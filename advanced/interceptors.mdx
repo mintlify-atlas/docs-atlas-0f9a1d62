@@ -1,0 +1,555 @@
+---
+title: 'Interceptors'
+description: 'Intercept and modify RTP/RTCP packets for advanced features'
+---
+
+## Overview
+
+Interceptors allow you to intercept and process RTP and RTCP packets as they flow through the WebRTC stack. They enable advanced features like:
+
+- NACK (Negative Acknowledgment) for packet loss recovery
+- TWCC (Transport Wide Congestion Control) for bandwidth estimation
+- RTCP Sender/Receiver Reports for statistics
+- Custom packet processing and modification
+- FlexFEC forward error correction
+
+<Note>
+  Pion provides a default set of interceptors that handle most common use cases. You only need to configure interceptors manually for advanced scenarios.
+</Note>
+
+## Default Interceptors
+
+Pion registers these interceptors by default:
+
+<Steps>
+  <Step title="NACK Generator & Responder">
+    Automatically requests retransmission of lost packets and responds to NACK requests
+  </Step>
+  
+  <Step title="RTCP Reports">
+    Generates Sender and Receiver Reports for connection statistics
+  </Step>
+  
+  <Step title="Stats Interceptor">
+    Collects RTP stream statistics accessible via GetStats()
+  </Step>
+  
+  <Step title="TWCC Sender">
+    Generates Transport-Wide Congestion Control feedback for bandwidth estimation
+  </Step>
+  
+  <Step title="Simulcast Extensions">
+    Enables RTP header extensions needed for simulcast (MID, RID)
+  </Step>
+</Steps>
+
+## Using Default Interceptors
+
+```go default-interceptors.go
+package main
+
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create MediaEngine and InterceptorRegistry
+    m := &webrtc.MediaEngine{}
+    if err := m.RegisterDefaultCodecs(); err != nil {
+        panic(err)
+    }
+    
+    i := &interceptor.Registry{}
+    
+    // Register default interceptors
+    if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+        panic(err)
+    }
+    
+    // Create API with MediaEngine and Interceptors
+    api := webrtc.NewAPI(
+        webrtc.WithMediaEngine(m),
+        webrtc.WithInterceptorRegistry(i),
+    )
+    
+    // Create PeerConnection
+    peerConnection, err := api.NewPeerConnection(webrtc.Configuration{})
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+}
+```
+
+From [interceptor.go:24-29](https://github.com/pion/webrtc/blob/master/interceptor.go:24-29).
+
+## Configuring Default Interceptors
+
+You can pass options to configure the default interceptors:
+
+```go interceptor-options.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/logging"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Create a logger factory
+loggerFactory := logging.NewDefaultLoggerFactory()
+
+// Register with options
+err := webrtc.RegisterDefaultInterceptorsWithOptions(m, i,
+    webrtc.WithInterceptorLoggerFactory(loggerFactory),
+)
+if err != nil {
+    panic(err)
+}
+```
+
+From [interceptor.go:31-75](https://github.com/pion/webrtc/blob/master/interceptor.go:31-75).
+
+## NACK Interceptor
+
+NACK (Negative Acknowledgment) enables automatic retransmission of lost RTP packets.
+
+### Basic Configuration
+
+```go nack.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Configure NACK
+if err := webrtc.ConfigureNack(m, i); err != nil {
+    panic(err)
+}
+```
+
+From [interceptor.go:142-168](https://github.com/pion/webrtc/blob/master/interceptor.go:142-168).
+
+### NACK with Options
+
+```go nack-options.go
+import (
+    "github.com/pion/interceptor/pkg/nack"
+    "github.com/pion/logging"
+)
+
+loggerFactory := logging.NewDefaultLoggerFactory()
+
+genOpts := []nack.GeneratorOption{
+    nack.WithGeneratorLoggerFactory(loggerFactory),
+}
+
+respOpts := []nack.ResponderOption{
+    nack.WithResponderLoggerFactory(loggerFactory),
+}
+
+err := webrtc.ConfigureNackWithOptions(m, i, genOpts, respOpts...)
+```
+
+From [interceptor.go:147-168](https://github.com/pion/webrtc/blob/master/interceptor.go:147-168).
+
+<Note>
+  NACK automatically registers the required RTCP feedback (`nack` and `nack pli`) to the MediaEngine.
+</Note>
+
+## TWCC (Transport-Wide Congestion Control)
+
+TWCC provides fine-grained bandwidth estimation by tracking individual RTP packets.
+
+### Configure TWCC Sender
+
+```go twcc.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Configure TWCC - generates TWCC feedback reports
+if err := webrtc.ConfigureTWCCSender(m, i); err != nil {
+    panic(err)
+}
+```
+
+This registers:
+- Transport-CC header extension for video and audio
+- TWCC RTCP feedback
+- TWCC sender interceptor
+
+From [interceptor.go:195-228](https://github.com/pion/webrtc/blob/master/interceptor.go:195-228).
+
+### TWCC with Options
+
+```go twcc-options.go
+import (
+    "github.com/pion/interceptor/pkg/twcc"
+    "github.com/pion/logging"
+)
+
+loggerFactory := logging.NewDefaultLoggerFactory()
+
+opts := []twcc.Option{
+    twcc.WithLoggerFactory(loggerFactory),
+}
+
+err := webrtc.ConfigureTWCCSenderWithOptions(m, i, opts...)
+```
+
+From [interceptor.go:201-228](https://github.com/pion/webrtc/blob/master/interceptor.go:201-228).
+
+### TWCC Header Extension Only
+
+If you only want to add TWCC header extensions (to let the remote peer generate reports):
+
+```go twcc-header.go
+// Only add header extension, don't generate reports
+if err := webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
+    panic(err)
+}
+```
+
+From [interceptor.go:170-193](https://github.com/pion/webrtc/blob/master/interceptor.go:170-193).
+
+## RTCP Reports
+
+Generate Sender and Receiver Reports for connection statistics.
+
+```go rtcp-reports.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Configure RTCP Reports
+if err := webrtc.ConfigureRTCPReports(i); err != nil {
+    panic(err)
+}
+```
+
+From [interceptor.go:116-140](https://github.com/pion/webrtc/blob/master/interceptor.go:116-140).
+
+### RTCP Reports with Options
+
+```go rtcp-options.go
+import (
+    "github.com/pion/interceptor/pkg/report"
+    "github.com/pion/logging"
+)
+
+loggerFactory := logging.NewDefaultLoggerFactory()
+
+recvOpts := []report.ReceiverOption{
+    report.WithReceiverLoggerFactory(loggerFactory),
+}
+
+sendOpts := []report.SenderOption{
+    report.WithSenderLoggerFactory(loggerFactory),
+}
+
+err := webrtc.ConfigureRTCPReportsWithOptions(i, recvOpts, sendOpts...)
+```
+
+## Stats Interceptor
+
+Collect detailed RTP stream statistics:
+
+```go stats.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Configure Stats
+if err := webrtc.ConfigureStatsInterceptor(i); err != nil {
+    panic(err)
+}
+
+api := webrtc.NewAPI(
+    webrtc.WithMediaEngine(m),
+    webrtc.WithInterceptorRegistry(i),
+)
+
+peerConnection, _ := api.NewPeerConnection(webrtc.Configuration{})
+
+// Later, get stats
+stats := peerConnection.GetStats()
+```
+
+From [interceptor.go:77-95](https://github.com/pion/webrtc/blob/master/interceptor.go:77-95).
+
+## Simulcast Extensions
+
+Enable RTP header extensions needed for simulcast:
+
+```go simulcast.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+// Configure simulcast extensions (MID, RID, Repair RID)
+if err := webrtc.ConfigureSimulcastExtensionHeaders(m); err != nil {
+    panic(err)
+}
+```
+
+This registers:
+- `sdp.SDESMidURI` - Media stream identification
+- `sdp.SDESRTPStreamIDURI` - RTP stream ID
+- `sdp.SDESRepairRTPStreamIDURI` - Repair stream ID
+
+From [interceptor.go:252-269](https://github.com/pion/webrtc/blob/master/interceptor.go:252-269).
+
+## FlexFEC (Forward Error Correction)
+
+FlexFEC adds redundancy to reduce packet loss impact:
+
+```go flexfec.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/interceptor/pkg/flexfec"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+// Configure FlexFEC with payload type 125
+options := []flexfec.FecOption{}
+err := webrtc.ConfigureFlexFEC03(
+    125, // payload type
+    m,
+    i,
+    options...,
+)
+if err != nil {
+    panic(err)
+}
+```
+
+<Warning>
+  FlexFEC interceptor must be registered **before** other interceptors that modify RTP packets (like TWCC), so that FEC packets are not modified.
+</Warning>
+
+From [interceptor.go:271-304](https://github.com/pion/webrtc/blob/master/interceptor.go:271-304).
+
+## RFC 8888 Congestion Control Feedback
+
+Register congestion control feedback as defined in RFC 8888:
+
+```go rfc8888.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/interceptor/pkg/rfc8888"
+    "github.com/pion/webrtc/v4"
+)
+
+m := &webrtc.MediaEngine{}
+m.RegisterDefaultCodecs()
+
+i := &interceptor.Registry{}
+
+options := []rfc8888.Option{}
+err := webrtc.ConfigureCongestionControlFeedback(m, i, options...)
+if err != nil {
+    panic(err)
+}
+```
+
+From [interceptor.go:230-250](https://github.com/pion/webrtc/blob/master/interceptor.go:230-250).
+
+## Custom Interceptor
+
+You can create custom interceptors to process RTP/RTCP packets:
+
+```go custom-interceptor.go
+import (
+    "github.com/pion/interceptor"
+    "github.com/pion/rtp"
+)
+
+// Custom interceptor that logs all RTP packets
+type LoggingInterceptor struct {
+    interceptor.NoOp
+}
+
+func (l *LoggingInterceptor) BindLocalStream(
+    info *interceptor.StreamInfo,
+    writer interceptor.RTPWriter,
+) interceptor.RTPWriter {
+    return interceptor.RTPWriterFunc(func(
+        header *rtp.Header,
+        payload []byte,
+        attributes interceptor.Attributes,
+    ) (int, error) {
+        fmt.Printf("Sending RTP: SSRC=%d PT=%d SN=%d\n",
+            header.SSRC, header.PayloadType, header.SequenceNumber)
+        return writer.Write(header, payload, attributes)
+    })
+}
+
+func (l *LoggingInterceptor) BindRemoteStream(
+    info *interceptor.StreamInfo,
+    reader interceptor.RTPReader,
+) interceptor.RTPReader {
+    return interceptor.RTPReaderFunc(func(
+        b []byte,
+        a interceptor.Attributes,
+    ) (int, interceptor.Attributes, error) {
+        n, attr, err := reader.Read(b, a)
+        if err == nil {
+            fmt.Printf("Received RTP packet (%d bytes)\n", n)
+        }
+        return n, attr, err
+    })
+}
+
+// Register the custom interceptor
+i := &interceptor.Registry{}
+i.Add(&LoggingInterceptor{})
+```
+
+## Complete Example
+
+<Accordion title="Full Interceptor Configuration">
+```go complete-example.go
+package main
+
+import (
+    "fmt"
+    "github.com/pion/interceptor"
+    "github.com/pion/interceptor/pkg/nack"
+    "github.com/pion/logging"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create MediaEngine
+    m := &webrtc.MediaEngine{}
+    if err := m.RegisterDefaultCodecs(); err != nil {
+        panic(err)
+    }
+    
+    // Create InterceptorRegistry
+    i := &interceptor.Registry{}
+    
+    // Create logger factory
+    loggerFactory := logging.NewDefaultLoggerFactory()
+    
+    // Configure NACK with logging
+    genOpts := []nack.GeneratorOption{
+        nack.WithGeneratorLoggerFactory(loggerFactory),
+    }
+    respOpts := []nack.ResponderOption{
+        nack.WithResponderLoggerFactory(loggerFactory),
+    }
+    if err := webrtc.ConfigureNackWithOptions(m, i, genOpts, respOpts...); err != nil {
+        panic(err)
+    }
+    
+    // Configure RTCP Reports
+    if err := webrtc.ConfigureRTCPReports(i); err != nil {
+        panic(err)
+    }
+    
+    // Configure simulcast extensions
+    if err := webrtc.ConfigureSimulcastExtensionHeaders(m); err != nil {
+        panic(err)
+    }
+    
+    // Configure Stats
+    if err := webrtc.ConfigureStatsInterceptor(i); err != nil {
+        panic(err)
+    }
+    
+    // Configure TWCC
+    if err := webrtc.ConfigureTWCCSender(m, i); err != nil {
+        panic(err)
+    }
+    
+    // Create API
+    api := webrtc.NewAPI(
+        webrtc.WithMediaEngine(m),
+        webrtc.WithInterceptorRegistry(i),
+    )
+    
+    // Create PeerConnection
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    }
+    
+    peerConnection, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    
+    fmt.Println("PeerConnection created with interceptors")
+    
+    // Later: access stats
+    stats := peerConnection.GetStats()
+    fmt.Printf("Stats available: %v\n", stats)
+}
+```
+</Accordion>
+
+## Interceptor Order
+
+The order of interceptors matters:
+
+1. **FlexFEC** - Must be first if used, so FEC packets aren't modified
+2. **NACK Responder** - Should be early to handle retransmissions
+3. **TWCC** - Add sequence numbers to packets
+4. **Stats** - Collect statistics
+5. **RTCP Reports** - Generate reports
+6. **NACK Generator** - Request retransmissions
+
+<Note>
+  `RegisterDefaultInterceptors` handles the correct ordering automatically.
+</Note>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="MediaEngine" icon="film" href="./media-engine">
+    Configure codecs and capabilities
+  </Card>
+  <Card title="SettingEngine" icon="gear" href="./setting-engine">
+    Advanced configuration options
+  </Card>
+</CardGroup>

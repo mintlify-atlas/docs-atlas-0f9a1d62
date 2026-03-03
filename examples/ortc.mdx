@@ -1,0 +1,579 @@
+---
+title: "ORTC"
+description: "Use the ORTC API for low-level WebRTC control and DataChannel communication"
+---
+
+The ORTC (Object Real-Time Communications) example demonstrates Pion WebRTC's ORTC capabilities, providing fine-grained control over the WebRTC stack. Instead of using the high-level PeerConnection API, ORTC gives you direct access to ICE, DTLS, and SCTP transports for maximum flexibility.
+
+## Overview
+
+ORTC is an alternative API to WebRTC that provides explicit control over the underlying transport layers. This example shows how to establish a DataChannel connection using the ORTC API, manually managing ICE gathering, DTLS handshake, and SCTP transport.
+
+## Key Features
+
+- Manual ICE transport management
+- Explicit DTLS and SCTP transport control
+- ICE role negotiation (controlling vs controlled)
+- Low-level signaling structure
+- DataChannel creation and handling via ORTC
+- HTTP server for easy SDP exchange (when acting as offerer)
+
+## ORTC vs WebRTC API
+
+| Aspect | WebRTC API | ORTC API |
+|--------|------------|----------|
+| **Abstraction** | High-level, automatic | Low-level, explicit |
+| **ICE** | Automatic | Manual gathering/control |
+| **DTLS** | Automatic | Manual start/configuration |
+| **Control** | Limited | Full access to transports |
+| **Complexity** | Simple | Advanced |
+| **Use Case** | Standard applications | Custom protocols, debugging |
+
+## How It Works
+
+<Steps>
+  <Step title="Create ICE Gatherer">
+    Manually create and configure ICE gathering:
+    ```go
+    // Prepare ICE gathering options
+    iceOptions := webrtc.ICEGatherOptions{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    }
+
+    api := webrtc.NewAPI()
+
+    // Create the ICE gatherer
+    gatherer, err := api.NewICEGatherer(iceOptions)
+    if err != nil {
+        panic(err)
+    }
+
+    // Handle candidates
+    gatherFinished := make(chan struct{})
+    gatherer.OnLocalCandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate == nil {
+            close(gatherFinished)
+        }
+    })
+
+    // Start gathering
+    if err = gatherer.Gather(); err != nil {
+        panic(err)
+    }
+    <-gatherFinished
+    ```
+  </Step>
+  
+  <Step title="Construct Transport Stack">
+    Build ICE, DTLS, and SCTP transports:
+    ```go
+    // Construct the ICE transport
+    ice := api.NewICETransport(gatherer)
+
+    // Construct the DTLS transport
+    dtls, err := api.NewDTLSTransport(ice, nil)
+    if err != nil {
+        panic(err)
+    }
+
+    // Construct the SCTP transport
+    sctp := api.NewSCTPTransport(dtls)
+    ```
+  </Step>
+  
+  <Step title="Gather Local Parameters">
+    Collect all parameters needed for signaling:
+    ```go
+    iceCandidates, err := gatherer.GetLocalCandidates()
+    if err != nil {
+        panic(err)
+    }
+
+    iceParams, err := gatherer.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+
+    dtlsParams, err := dtls.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+
+    sctpCapabilities := sctp.GetCapabilities()
+
+    signal := Signal{
+        ICECandidates:    iceCandidates,
+        ICEParameters:    iceParams,
+        DTLSParameters:   dtlsParams,
+        SCTPCapabilities: sctpCapabilities,
+    }
+    ```
+  </Step>
+  
+  <Step title="Exchange Signaling">
+    Exchange ORTC parameters with remote peer:
+    ```go
+    // Signal structure (not part of ORTC spec)
+    type Signal struct {
+        ICECandidates    []webrtc.ICECandidate   `json:"iceCandidates"`
+        ICEParameters    webrtc.ICEParameters    `json:"iceParameters"`
+        DTLSParameters   webrtc.DTLSParameters   `json:"dtlsParameters"`
+        SCTPCapabilities webrtc.SCTPCapabilities `json:"sctpCapabilities"`
+    }
+
+    // Send local signal
+    fmt.Println(encode(signal))
+
+    // Receive remote signal
+    remoteSignal := Signal{}
+    decode(readUntilNewline(), &remoteSignal)
+    ```
+  </Step>
+  
+  <Step title="Start Transports">
+    Manually start each transport layer:
+    ```go
+    // Determine ICE role
+    iceRole := webrtc.ICERoleControlled
+    if isOffer {
+        iceRole = webrtc.ICERoleControlling
+    }
+
+    // Set remote ICE candidates
+    if err = ice.SetRemoteCandidates(
+        remoteSignal.ICECandidates,
+    ); err != nil {
+        panic(err)
+    }
+
+    // Start ICE transport
+    err = ice.Start(nil, remoteSignal.ICEParameters, &iceRole)
+    if err != nil {
+        panic(err)
+    }
+
+    // Start DTLS transport
+    if err = dtls.Start(remoteSignal.DTLSParameters); err != nil {
+        panic(err)
+    }
+
+    // Start SCTP transport
+    if err = sctp.Start(remoteSignal.SCTPCapabilities); err != nil {
+        panic(err)
+    }
+    ```
+  </Step>
+  
+  <Step title="Create DataChannel">
+    Create DataChannel using ORTC API:
+    ```go
+    // Offerer creates the data channel
+    if isOffer {
+        var id uint16 = 1
+        dcParams := &webrtc.DataChannelParameters{
+            Label: "Foo",
+            ID:    &id,
+        }
+        
+        channel, err := api.NewDataChannel(sctp, dcParams)
+        if err != nil {
+            panic(err)
+        }
+
+        channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf(
+                "Message from DataChannel '%s': '%s'\n",
+                channel.Label(),
+                string(msg.Data),
+            )
+        })
+    } else {
+        // Answerer handles incoming data channels
+        sctp.OnDataChannel(func(channel *webrtc.DataChannel) {
+            fmt.Printf(
+                "New DataChannel %s %d\n",
+                channel.Label(),
+                channel.ID(),
+            )
+            
+            channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+                fmt.Printf(
+                    "Message from DataChannel '%s': '%s'\n",
+                    channel.Label(),
+                    string(msg.Data),
+                )
+            })
+        })
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete Source Code
+
+<CodeGroup>
+```go Main Application
+package main
+
+import (
+    "bufio"
+    "encoding/base64"
+    "encoding/json"
+    "errors"
+    "flag"
+    "fmt"
+    "io"
+    "net/http"
+    "os"
+    "strconv"
+    "strings"
+    "time"
+
+    "github.com/pion/randutil"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    isOffer := flag.Bool("offer", false, "Act as the offerer if set")
+    port := flag.Int("port", 8080, "http server port")
+    flag.Parse()
+
+    // Prepare ICE gathering options
+    iceOptions := webrtc.ICEGatherOptions{
+        ICEServers: []webrtc.ICEServer{
+            {URLs: []string{"stun:stun.l.google.com:19302"}},
+        },
+    }
+
+    api := webrtc.NewAPI()
+
+    // Create ICE gatherer
+    gatherer, err := api.NewICEGatherer(iceOptions)
+    if err != nil {
+        panic(err)
+    }
+
+    // Construct transports
+    ice := api.NewICETransport(gatherer)
+    dtls, err := api.NewDTLSTransport(ice, nil)
+    if err != nil {
+        panic(err)
+    }
+    sctp := api.NewSCTPTransport(dtls)
+
+    // Handle incoming data channels (for answerer)
+    sctp.OnDataChannel(func(channel *webrtc.DataChannel) {
+        fmt.Printf("New DataChannel %s %d\n", channel.Label(), channel.ID())
+        channel.OnOpen(handleOnOpen(channel))
+        channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf(
+                "Message from DataChannel '%s': '%s'\n",
+                channel.Label(),
+                string(msg.Data),
+            )
+        })
+    })
+
+    // Gather ICE candidates
+    gatherFinished := make(chan struct{})
+    gatherer.OnLocalCandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate == nil {
+            close(gatherFinished)
+        }
+    })
+
+    if err = gatherer.Gather(); err != nil {
+        panic(err)
+    }
+    <-gatherFinished
+
+    // Get local parameters
+    iceCandidates, err := gatherer.GetLocalCandidates()
+    if err != nil {
+        panic(err)
+    }
+
+    iceParams, err := gatherer.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+
+    dtlsParams, err := dtls.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+
+    sctpCapabilities := sctp.GetCapabilities()
+
+    s := Signal{
+        ICECandidates:    iceCandidates,
+        ICEParameters:    iceParams,
+        DTLSParameters:   dtlsParams,
+        SCTPCapabilities: sctpCapabilities,
+    }
+
+    iceRole := webrtc.ICERoleControlled
+
+    // Exchange signaling
+    fmt.Println(encode(s))
+    remoteSignal := Signal{}
+
+    if *isOffer {
+        signalingChan := httpSDPServer(*port)
+        decode(<-signalingChan, &remoteSignal)
+        iceRole = webrtc.ICERoleControlling
+    } else {
+        decode(readUntilNewline(), &remoteSignal)
+    }
+
+    // Start transports
+    if err = ice.SetRemoteCandidates(remoteSignal.ICECandidates); err != nil {
+        panic(err)
+    }
+
+    err = ice.Start(nil, remoteSignal.ICEParameters, &iceRole)
+    if err != nil {
+        panic(err)
+    }
+
+    if err = dtls.Start(remoteSignal.DTLSParameters); err != nil {
+        panic(err)
+    }
+
+    if err = sctp.Start(remoteSignal.SCTPCapabilities); err != nil {
+        panic(err)
+    }
+
+    // Create data channel (offerer only)
+    if *isOffer {
+        var id uint16 = 1
+        dcParams := &webrtc.DataChannelParameters{
+            Label: "Foo",
+            ID:    &id,
+        }
+        
+        channel, err := api.NewDataChannel(sctp, dcParams)
+        if err != nil {
+            panic(err)
+        }
+
+        go handleOnOpen(channel)()
+        channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+            fmt.Printf(
+                "Message from DataChannel '%s': '%s'\n",
+                channel.Label(),
+                string(msg.Data),
+            )
+        })
+    }
+
+    select {}
+}
+```
+
+```go Signal Structure
+type Signal struct {
+    ICECandidates    []webrtc.ICECandidate   `json:"iceCandidates"`
+    ICEParameters    webrtc.ICEParameters    `json:"iceParameters"`
+    DTLSParameters   webrtc.DTLSParameters   `json:"dtlsParameters"`
+    SCTPCapabilities webrtc.SCTPCapabilities `json:"sctpCapabilities"`
+}
+
+func encode(obj Signal) string {
+    b, err := json.Marshal(obj)
+    if err != nil {
+        panic(err)
+    }
+    return base64.StdEncoding.EncodeToString(b)
+}
+
+func decode(in string, obj *Signal) {
+    b, err := base64.StdEncoding.DecodeString(in)
+    if err != nil {
+        panic(err)
+    }
+
+    if err = json.Unmarshal(b, obj); err != nil {
+        panic(err)
+    }
+}
+```
+
+```go Message Handler
+func handleOnOpen(channel *webrtc.DataChannel) func() {
+    return func() {
+        fmt.Printf(
+            "Data channel '%s'-'%d' open. Random messages every 5 seconds\n",
+            channel.Label(),
+            channel.ID(),
+        )
+
+        ticker := time.NewTicker(5 * time.Second)
+        defer ticker.Stop()
+        
+        for range ticker.C {
+            message, err := randutil.GenerateCryptoRandomString(
+                15,
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            )
+            if err != nil {
+                panic(err)
+            }
+
+            fmt.Printf("Sending %s \n", message)
+            if err := channel.SendText(message); err != nil {
+                panic(err)
+            }
+        }
+    }
+}
+```
+</CodeGroup>
+
+## Important Implementation Details
+
+<AccordionGroup>
+  <Accordion title="ICE Role Negotiation">
+    ORTC requires explicit ICE role assignment:
+    
+    ```go
+    iceRole := webrtc.ICERoleControlled
+    if isOffer {
+        iceRole = webrtc.ICERoleControlling
+    }
+    ```
+    
+    **Roles:**
+    - **Controlling**: Acts as offerer, initiates connectivity checks
+    - **Controlled**: Acts as answerer, responds to checks
+    
+    Both sides must agree on roles or connection will fail.
+  </Accordion>
+  
+  <Accordion title="Signal Structure">
+    The `Signal` struct is NOT part of the ORTC specification:
+    
+    ```go
+    type Signal struct {
+        ICECandidates    []webrtc.ICECandidate
+        ICEParameters    webrtc.ICEParameters
+        DTLSParameters   webrtc.DTLSParameters
+        SCTPCapabilities webrtc.SCTPCapabilities
+    }
+    ```
+    
+    ORTC doesn't define a signaling format - you're free to exchange this information however you want:
+    - JSON over WebSocket
+    - Protocol Buffers
+    - Custom binary format
+    - HTTP POST (as shown in example)
+  </Accordion>
+  
+  <Accordion title="Transport Ordering">
+    Transports must be started in order:
+    
+    1. **ICE Transport** - Network connectivity
+    2. **DTLS Transport** - Security/encryption
+    3. **SCTP Transport** - DataChannel support
+    
+    Starting out of order will cause connection failures.
+  </Accordion>
+  
+  <Accordion title="DataChannel Creation">
+    Only the offerer should create DataChannels initially:
+    
+    ```go
+    if isOffer {
+        channel, err := api.NewDataChannel(sctp, dcParams)
+        // ...
+    } else {
+        sctp.OnDataChannel(func(channel *webrtc.DataChannel) {
+            // Handle incoming channel
+        })
+    }
+    ```
+    
+    The answerer handles channels via the `OnDataChannel` callback.
+  </Accordion>
+</AccordionGroup>
+
+## Running the Example
+
+### Two Terminal Setup
+
+<Steps>
+  <Step title="Start as answerer (Terminal 1)">
+    ```bash
+    cd examples/ortc
+    go run main.go
+    ```
+    
+    Copy the base64 encoded signal that appears
+  </Step>
+  
+  <Step title="Start as offerer (Terminal 2)">
+    ```bash
+    go run main.go --offer --port 8081
+    ```
+    
+    Copy the base64 encoded signal
+  </Step>
+  
+  <Step title="Exchange signals">
+    - Paste offerer's signal into answerer's terminal
+    - Paste answerer's signal via curl to offerer:
+    ```bash
+    curl -X POST -d "<answerer-signal>" http://localhost:8081
+    ```
+  </Step>
+  
+  <Step title="Watch messages">
+    Both terminals will show random messages being exchanged every 5 seconds
+  </Step>
+</Steps>
+
+## When to Use ORTC
+
+<CardGroup cols={2}>
+  <Card title="Custom Protocols" icon="code">
+    Building custom signaling or connection protocols that don't fit WebRTC's model
+  </Card>
+  
+  <Card title="Debugging" icon="bug">
+    Deep debugging of connection issues with fine-grained control over each layer
+  </Card>
+  
+  <Card title="Research" icon="flask">
+    Academic research or experimentation with transport protocols
+  </Card>
+  
+  <Card title="Optimization" icon="gauge-high">
+    Performance optimization requiring precise control over network behavior
+  </Card>
+</CardGroup>
+
+<Note>
+  For most applications, the standard WebRTC PeerConnection API is recommended. Use ORTC only when you need the additional control and complexity it provides.
+</Note>
+
+## Advantages & Trade-offs
+
+**Advantages:**
+- Full control over transport layers
+- Custom signaling formats
+- Better debugging visibility
+- Fine-grained configuration
+
+**Trade-offs:**
+- More complex code
+- More error-prone
+- Requires deeper protocol knowledge
+- Limited browser support (mostly Chromium)
+
+## Related Examples
+
+- [Data Channels](/examples/data-channels-basic) - Standard WebRTC DataChannel API
+- [Pion to Pion](/examples/pion-to-pion) - Two Pion instances communicating
+- [Data Channels Detach](/examples/data-channels-detach) - Lower-level DataChannel access

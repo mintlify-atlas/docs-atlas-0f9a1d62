@@ -1,0 +1,666 @@
+---
+title: 'ICE Configuration'
+description: 'Advanced ICE configuration for NAT traversal and connectivity'
+---
+
+## Overview
+
+ICE (Interactive Connectivity Establishment) is the mechanism WebRTC uses to establish peer-to-peer connections through NATs and firewalls. Proper ICE configuration is critical for reliable connectivity across different network environments.
+
+<Note>
+  Most ICE configuration is done through the SettingEngine. This guide focuses specifically on ICE-related settings.
+</Note>
+
+## ICE Servers
+
+ICE servers (STUN/TURN) help discover public IPs and relay traffic when direct connection fails.
+
+### Basic Configuration
+
+```go ice-servers.go
+package main
+
+import "github.com/pion/webrtc/v4"
+
+func main() {
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+}
+```
+
+From [configuration.go:14-59](https://github.com/pion/webrtc/blob/master/configuration.go:14-59).
+
+### Multiple STUN Servers
+
+```go multiple-stun.go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+            },
+        },
+    },
+}
+```
+
+### TURN Server Configuration
+
+TURN servers relay traffic when direct connection and STUN fail:
+
+```go turn-server.go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+        {
+            URLs:       []string{"turn:turn.example.com:3478"},
+            Username:   "user",
+            Credential: "password",
+        },
+    },
+}
+```
+
+From [iceserver.go:16-75](https://github.com/pion/webrtc/blob/master/iceserver.go:16-75).
+
+### TURN over TLS
+
+```go turn-tls.go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs:       []string{"turns:turn.example.com:5349"},
+            Username:   "user",
+            Credential: "password",
+        },
+    },
+}
+```
+
+### Multiple Protocols
+
+```go multi-protocol.go
+config := webrtc.Configuration{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{
+                "stun:stun.example.com:3478",
+                "turn:turn.example.com:3478",
+                "turns:turn.example.com:5349",
+            },
+            Username:   "user",
+            Credential: "password",
+        },
+    },
+}
+```
+
+## ICE Transport Policy
+
+Control which ICE candidates are used:
+
+```go transport-policy.go
+import "github.com/pion/webrtc/v4"
+
+// Use all candidates (default)
+config := webrtc.Configuration{
+    ICETransportPolicy: webrtc.ICETransportPolicyAll,
+}
+
+// Force relay (TURN only) - ensures traffic goes through TURN
+config = webrtc.Configuration{
+    ICETransportPolicy: webrtc.ICETransportPolicyRelay,
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs:       []string{"turn:turn.example.com:3478"},
+            Username:   "user",
+            Credential: "password",
+        },
+    },
+}
+```
+
+<Warning>
+  Using `ICETransportPolicyRelay` requires a TURN server and will fail if none is available.
+</Warning>
+
+## Network Types
+
+Control which network types are used for ICE candidates:
+
+```go network-types.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// IPv4 UDP only (default)
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeUDP4,
+})
+
+// IPv4 and IPv6 UDP
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeUDP4,
+    webrtc.NetworkTypeUDP6,
+})
+
+// TCP only
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeTCP4,
+    webrtc.NetworkTypeTCP6,
+})
+
+// All types
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeUDP4,
+    webrtc.NetworkTypeUDP6,
+    webrtc.NetworkTypeTCP4,
+    webrtc.NetworkTypeTCP6,
+})
+```
+
+From [settingengine.go:286-290](https://github.com/pion/webrtc/blob/master/settingengine.go:286-290).
+
+## ICE Timeouts
+
+Configure connection timeouts and keepalive:
+
+```go timeouts.go
+import (
+    "time"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// Configure ICE timeouts
+s.SetICETimeouts(
+    5*time.Second,  // disconnected timeout - no activity before disconnected
+    25*time.Second, // failed timeout - no activity before failed after disconnected
+    2*time.Second,  // keepalive interval - how often to send keepalive if no activity
+)
+```
+
+### Timeout Details
+
+<Steps>
+  <Step title="Disconnected Timeout (default: 5s)">
+    How long without network activity before ICE considers the connection disconnected. The connection can recover from this state.
+  </Step>
+  
+  <Step title="Failed Timeout (default: 25s)">
+    How long after disconnected before ICE considers the connection failed. Recovery is unlikely after this.
+  </Step>
+  
+  <Step title="Keepalive Interval (default: 2s)">
+    How often to send keepalive packets when no media is flowing. Prevents NAT bindings from timing out.
+  </Step>
+</Steps>
+
+From [settingengine.go:218-237](https://github.com/pion/webrtc/blob/master/settingengine.go:218-237).
+
+### Candidate Acceptance Timeouts
+
+```go acceptance-timeouts.go
+import (
+    "time"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// How long to wait before accepting different candidate types
+s.SetHostAcceptanceMinWait(0 * time.Millisecond)        // Host candidates
+s.SetSrflxAcceptanceMinWait(500 * time.Millisecond)     // Server reflexive
+s.SetPrflxAcceptanceMinWait(500 * time.Millisecond)     // Peer reflexive
+s.SetRelayAcceptanceMinWait(2000 * time.Millisecond)    // Relay (TURN)
+```
+
+From [settingengine.go:239-257](https://github.com/pion/webrtc/blob/master/settingengine.go:239-257).
+
+## Port Range
+
+Limit the UDP port range used for ICE:
+
+```go port-range.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Restrict ICE to ports 10000-20000
+err := s.SetEphemeralUDPPortRange(10000, 20000)
+if err != nil {
+    panic(err)
+}
+```
+
+<Note>
+  Limiting the port range is useful for firewall configurations. Make sure the range is large enough for your use case.
+</Note>
+
+From [settingengine.go:264-279](https://github.com/pion/webrtc/blob/master/settingengine.go:264-279).
+
+## Single Port (UDPMux)
+
+Serve all WebRTC traffic on a single UDP port:
+
+```go udp-mux.go
+import (
+    "github.com/pion/ice/v4"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// All traffic goes through port 8443
+mux, err := ice.NewMultiUDPMuxFromPort(8443)
+if err != nil {
+    panic(err)
+}
+
+s.SetICEUDPMux(mux)
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+
+// Create multiple PeerConnections - all use port 8443
+peerConnection1, _ := api.NewPeerConnection(webrtc.Configuration{})
+peerConnection2, _ := api.NewPeerConnection(webrtc.Configuration{})
+```
+
+See full example at [examples/ice-single-port/main.go](https://github.com/pion/webrtc/blob/master/examples/ice-single-port/main.go:82-97).
+
+<Note>
+  UDPMux is extremely useful for servers that need predictable port usage for firewall rules.
+</Note>
+
+## ICE-TCP
+
+Enable ICE over TCP:
+
+```go ice-tcp.go
+import (
+    "net"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// Enable TCP candidates
+s.SetNetworkTypes([]webrtc.NetworkType{
+    webrtc.NetworkTypeTCP4,
+    webrtc.NetworkTypeTCP6,
+})
+
+// Create TCP listener
+tcpListener, err := net.ListenTCP("tcp", &net.TCPAddr{
+    IP:   net.IP{0, 0, 0, 0},
+    Port: 8443,
+})
+if err != nil {
+    panic(err)
+}
+
+// Create TCPMux with max 8 connections per listener
+tcpMux := webrtc.NewICETCPMux(nil, tcpListener, 8)
+s.SetICETCPMux(tcpMux)
+
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+```
+
+See full example at [examples/ice-tcp/main.go](https://github.com/pion/webrtc/blob/master/examples/ice-tcp/main.go:87-106).
+
+<Note>
+  ICE-TCP is useful when UDP is blocked but is generally slower than UDP.
+</Note>
+
+## Network Interface Filtering
+
+Control which network interfaces are used:
+
+```go interface-filter.go
+import (
+    "net"
+    "strings"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// Exclude docker and virtual interfaces
+s.SetInterfaceFilter(func(interfaceName string) bool {
+    // Return true to keep, false to exclude
+    if strings.HasPrefix(interfaceName, "docker") {
+        return false
+    }
+    if strings.HasPrefix(interfaceName, "veth") {
+        return false
+    }
+    return true
+})
+
+// Only use specific interface
+s.SetInterfaceFilter(func(interfaceName string) bool {
+    return interfaceName == "eth0"
+})
+```
+
+From [settingengine.go:292-298](https://github.com/pion/webrtc/blob/master/settingengine.go:292-298).
+
+## IP Address Filtering
+
+Filter which IP addresses are used:
+
+```go ip-filter.go
+import (
+    "net"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// Only use private IPs
+s.SetIPFilter(func(ip net.IP) bool {
+    return ip.IsPrivate()
+})
+
+// Only use public IPs
+s.SetIPFilter(func(ip net.IP) bool {
+    return !ip.IsPrivate()
+})
+
+// Exclude specific subnet
+s.SetIPFilter(func(ip net.IP) bool {
+    // Exclude 10.0.0.0/8
+    _, excludeNet, _ := net.ParseCIDR("10.0.0.0/8")
+    return !excludeNet.Contains(ip)
+})
+```
+
+From [settingengine.go:300-306](https://github.com/pion/webrtc/blob/master/settingengine.go:300-306).
+
+## NAT 1:1 Mapping
+
+Configure external IP addresses for NAT environments:
+
+```go nat-mapping.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// AWS EC2 example - private IP 10.0.1.5, public IP 203.0.113.1
+s.SetNAT1To1IPs(
+    []string{"203.0.113.1"},
+    webrtc.ICECandidateTypeHost,
+)
+```
+
+<Warning>
+  `SetNAT1To1IPs` is deprecated. Use `SetICEAddressRewriteRules` for more control.
+</Warning>
+
+### Address Rewrite Rules (Recommended)
+
+```go address-rewrite.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Replace private IP with public IP
+rules := []webrtc.ICEAddressRewriteRule{
+    {
+        External:        []string{"203.0.113.1"},
+        AsCandidateType: webrtc.ICECandidateTypeHost,
+        Mode:            webrtc.ICEAddressRewriteReplace,
+    },
+}
+
+err := s.SetICEAddressRewriteRules(rules...)
+if err != nil {
+    panic(err)
+}
+```
+
+From [settingengine.go:345-368](https://github.com/pion/webrtc/blob/master/settingengine.go:345-368).
+
+## ICE Lite
+
+Enable ICE Lite mode (for servers):
+
+```go ice-lite.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Enable ICE Lite (typically for servers)
+s.SetLite(true)
+```
+
+<Note>
+  ICE Lite is used when the endpoint has a public IP and doesn't need to perform full ICE. Typically used on servers.
+</Note>
+
+From [settingengine.go:281-284](https://github.com/pion/webrtc/blob/master/settingengine.go:281-284).
+
+## mDNS Configuration
+
+Configure mDNS for local network discovery:
+
+```go mdns.go
+import (
+    "github.com/pion/ice/v4"
+    "github.com/pion/webrtc/v4"
+)
+
+s := webrtc.SettingEngine{}
+
+// Enable mDNS
+s.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryAndGather)
+
+// Disable mDNS
+s.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+
+// Only respond to mDNS queries
+s.SetICEMulticastDNSMode(ice.MulticastDNSModeQueryOnly)
+
+// Set custom mDNS hostname
+s.SetMulticastDNSHostName("my-peer.local")
+```
+
+From [settingengine.go:405-416](https://github.com/pion/webrtc/blob/master/settingengine.go:405-416).
+
+<Warning>
+  Only use custom mDNS hostnames for single PeerConnection. Multiple PeerConnections with the same hostname will cause undefined behavior.
+</Warning>
+
+## Static ICE Credentials
+
+Set static ICE username and password:
+
+```go static-credentials.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Set static credentials (for signalless WebRTC)
+s.SetICECredentials("myUserFragment", "myPassword")
+```
+
+<Note>
+  Static credentials are useful for signalless WebRTC where peers have pre-configured connection parameters.
+</Note>
+
+From [settingengine.go:418-425](https://github.com/pion/webrtc/blob/master/settingengine.go:418-425).
+
+## ICE Binding Requests
+
+Limit the number of ICE binding requests:
+
+```go binding-requests.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Limit to 7 binding requests per candidate
+var maxRequests uint16 = 7
+s.SetICEMaxBindingRequests(maxRequests)
+```
+
+From [settingengine.go:485-489](https://github.com/pion/webrtc/blob/master/settingengine.go:485-489).
+
+## Loopback Candidates
+
+Include loopback interface in candidates:
+
+```go loopback.go
+import "github.com/pion/webrtc/v4"
+
+s := webrtc.SettingEngine{}
+
+// Enable loopback candidates (useful for VMs with public IP mapped to loopback)
+s.SetIncludeLoopbackCandidate(true)
+```
+
+From [settingengine.go:370-374](https://github.com/pion/webrtc/blob/master/settingengine.go:370-374).
+
+## Complete Example
+
+<Accordion title="Full ICE Configuration">
+```go complete-ice.go
+package main
+
+import (
+    "net"
+    "strings"
+    "time"
+    
+    "github.com/pion/ice/v4"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create SettingEngine
+    s := webrtc.SettingEngine{}
+    
+    // Configure timeouts
+    s.SetICETimeouts(
+        5*time.Second,
+        25*time.Second,
+        2*time.Second,
+    )
+    
+    // Configure port range
+    s.SetEphemeralUDPPortRange(10000, 20000)
+    
+    // Configure network types
+    s.SetNetworkTypes([]webrtc.NetworkType{
+        webrtc.NetworkTypeUDP4,
+        webrtc.NetworkTypeUDP6,
+    })
+    
+    // Filter interfaces
+    s.SetInterfaceFilter(func(name string) bool {
+        return !strings.HasPrefix(name, "docker")
+    })
+    
+    // Filter IPs
+    s.SetIPFilter(func(ip net.IP) bool {
+        return ip.IsPrivate()
+    })
+    
+    // Configure NAT mapping
+    rules := []webrtc.ICEAddressRewriteRule{
+        {
+            External:        []string{"203.0.113.1"},
+            AsCandidateType: webrtc.ICECandidateTypeHost,
+        },
+    }
+    s.SetICEAddressRewriteRules(rules...)
+    
+    // Create API
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    
+    // Create PeerConnection with ICE servers
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "user",
+                Credential: "password",
+            },
+        },
+    }
+    
+    peerConnection, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+}
+```
+</Accordion>
+
+## Debugging ICE Issues
+
+<Steps>
+  <Step title="Enable ICE Logging">
+    Use custom logging to see ICE candidate gathering and connectivity checks.
+    ```go
+    s := webrtc.SettingEngine{
+        LoggerFactory: logging.NewDefaultLoggerFactory(),
+    }
+    ```
+  </Step>
+  
+  <Step title="Monitor Connection States">
+    Track ICE connection state changes:
+    ```go
+    peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+        fmt.Printf("ICE State: %s\n", state)
+    })
+    ```
+  </Step>
+  
+  <Step title="Log ICE Candidates">
+    See what candidates are gathered:
+    ```go
+    peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate != nil {
+            fmt.Printf("Candidate: %s\n", candidate.String())
+        }
+    })
+    ```
+  </Step>
+  
+  <Step title="Test STUN/TURN Servers">
+    Verify your STUN/TURN servers are reachable and properly configured.
+  </Step>
+</Steps>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="SettingEngine" icon="gear" href="./setting-engine">
+    Complete SettingEngine reference
+  </Card>
+  <Card title="Custom Logging" icon="terminal" href="./custom-logging">
+    Debug ICE with custom logging
+  </Card>
+</CardGroup>

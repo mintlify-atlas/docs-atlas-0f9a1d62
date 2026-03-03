@@ -1,0 +1,368 @@
+---
+title: TrackLocal
+description: Interface for controlling how media data flows from the track to the PeerConnection.
+---
+
+## Overview
+
+TrackLocal is an interface that controls how the user can send media. The user can provide their own TrackLocal implementations, or use the implementations provided in the library.
+
+## Interface Definition
+
+```go
+type TrackLocal interface {
+    // Bind implements the way media data flows from Track to PeerConnection
+    Bind(TrackLocalContext) (RTPCodecParameters, error)
+    
+    // Unbind implements teardown logic when track is no longer needed
+    Unbind(TrackLocalContext) error
+    
+    // ID is the unique identifier for this Track
+    ID() string
+    
+    // RID is the RTP Stream ID for this track
+    RID() string
+    
+    // StreamID is the group this track belongs to
+    StreamID() string
+    
+    // Kind controls if this TrackLocal is audio or video
+    Kind() RTPCodecType
+}
+```
+
+## Methods
+
+### Bind
+
+Implements the way media data flows from the Track to the PeerConnection. This is called internally after signaling is complete and the list of available codecs has been determined.
+
+```go
+Bind(TrackLocalContext) (RTPCodecParameters, error)
+```
+
+<ParamField path="context" type="TrackLocalContext" required>
+  The context containing negotiated parameters, SSRCs, and write stream
+</ParamField>
+
+<ResponseField name="codec" type="RTPCodecParameters">
+  The selected codec parameters to use for this track
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if binding fails
+</ResponseField>
+
+### Unbind
+
+Implements the teardown logic when the track is no longer needed. This happens because a track has been stopped.
+
+```go
+Unbind(TrackLocalContext) error
+```
+
+<ParamField path="context" type="TrackLocalContext" required>
+  The context that was previously bound
+</ParamField>
+
+### ID
+
+Returns the unique identifier for this Track. This should be unique for the stream, but doesn't have to be globally unique. A common example would be 'audio' or 'video' and StreamID would be 'desktop' or 'webcam'.
+
+```go
+ID() string
+```
+
+<ResponseField name="id" type="string">
+  The track identifier
+</ResponseField>
+
+### RID
+
+Returns the RTP Stream ID for this track. Used for simulcast scenarios where multiple tracks share the same ID but have different RIDs.
+
+```go
+RID() string
+```
+
+<ResponseField name="rid" type="string">
+  The RTP stream identifier, or empty string if not set
+</ResponseField>
+
+### StreamID
+
+Returns the group this track belongs to. This must be unique.
+
+```go
+StreamID() string
+```
+
+<ResponseField name="streamID" type="string">
+  The stream identifier
+</ResponseField>
+
+### Kind
+
+Returns whether this TrackLocal is audio or video.
+
+```go
+Kind() RTPCodecType
+```
+
+<ResponseField name="kind" type="RTPCodecType">
+  Either RTPCodecTypeAudio or RTPCodecTypeVideo
+</ResponseField>
+
+## TrackLocalContext
+
+The context passed when a TrackLocal has been bound/unbound from a PeerConnection.
+
+```go
+type TrackLocalContext interface {
+    // CodecParameters returns negotiated RTPCodecParameters
+    CodecParameters() []RTPCodecParameters
+    
+    // HeaderExtensions returns negotiated RTPHeaderExtensionParameters
+    HeaderExtensions() []RTPHeaderExtensionParameter
+    
+    // SSRC returns the negotiated SSRC
+    SSRC() SSRC
+    
+    // SSRCRetransmission returns the negotiated retransmission SSRC
+    SSRCRetransmission() SSRC
+    
+    // SSRCForwardErrorCorrection returns the negotiated FEC SSRC
+    SSRCForwardErrorCorrection() SSRC
+    
+    // WriteStream returns the WriteStream for this TrackLocal
+    WriteStream() TrackLocalWriter
+    
+    // ID is a unique identifier used for both Bind/Unbind
+    ID() string
+    
+    // RTCPReader returns the RTCP interceptor for this TrackLocal
+    RTCPReader() interceptor.RTCPReader
+}
+```
+
+## TrackLocalWriter
+
+The Writer interface for outbound RTP Packets.
+
+```go
+type TrackLocalWriter interface {
+    // WriteRTP encrypts an RTP packet and writes to the connection
+    WriteRTP(header *rtp.Header, payload []byte) (int, error)
+    
+    // Write encrypts and writes a full RTP packet
+    Write(b []byte) (int, error)
+}
+```
+
+## Built-in Implementations
+
+Pion WebRTC provides several built-in TrackLocal implementations:
+
+<Expandable title="TrackLocalStaticRTP">
+A track that reads RTP packets from a channel. Useful for reading from a file or programmatically generating packets.
+
+```go
+track, err := webrtc.NewTrackLocalStaticRTP(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+```
+</Expandable>
+
+<Expandable title="TrackLocalStaticSample">
+A track that accepts media samples and handles packetization automatically.
+
+```go
+track, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+    "audio",
+    "pion",
+)
+
+// Write samples
+track.WriteSample(media.Sample{
+    Data:     audioData,
+    Duration: time.Millisecond * 20,
+})
+```
+</Expandable>
+
+## Usage Examples
+
+### Creating a Video Track
+
+```go
+// Create a VP8 video track
+videoTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+// Add track to peer connection
+rtpSender, err := peerConnection.AddTrack(videoTrack)
+if err != nil {
+    panic(err)
+}
+
+fmt.Printf("Track ID: %s\n", videoTrack.ID())
+fmt.Printf("Stream ID: %s\n", videoTrack.StreamID())
+fmt.Printf("Kind: %s\n", videoTrack.Kind())
+```
+
+### Creating an Audio Track
+
+```go
+// Create an Opus audio track
+audioTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{
+        MimeType:  webrtc.MimeTypeOpus,
+        ClockRate: 48000,
+        Channels:  2,
+    },
+    "audio",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+peerConnection.AddTrack(audioTrack)
+```
+
+### Writing Media Samples
+
+```go
+track, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+
+peerConnection.AddTrack(track)
+
+// Write video frames
+for {
+    // Get frame from your source
+    frame := getNextVideoFrame()
+    
+    err := track.WriteSample(media.Sample{
+        Data:     frame,
+        Duration: time.Millisecond * 33, // ~30fps
+    })
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+### Simulcast with RIDs
+
+```go
+// Create tracks for different quality levels
+highTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+highTrack.SetRID("high")
+
+mediumTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+mediumTrack.SetRID("medium")
+
+lowTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+lowTrack.SetRID("low")
+
+// Add base track
+rtpSender, _ := peerConnection.AddTrack(highTrack)
+
+// Add additional encodings
+rtpSender.AddEncoding(mediumTrack)
+rtpSender.AddEncoding(lowTrack)
+```
+
+### Using TrackLocalStaticRTP
+
+```go
+// Create track that accepts raw RTP packets
+track, err := webrtc.NewTrackLocalStaticRTP(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+    "video",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+peerConnection.AddTrack(track)
+
+// Write RTP packets
+for {
+    rtpPacket := getRTPPacket() // Your RTP packet source
+    
+    err := track.WriteRTP(rtpPacket)
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+### Custom TrackLocal Implementation
+
+```go
+type CustomTrack struct {
+    id       string
+    streamID string
+    kind     webrtc.RTPCodecType
+}
+
+func (t *CustomTrack) Bind(ctx webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
+    // Select codec from available options
+    codecs := ctx.CodecParameters()
+    if len(codecs) == 0 {
+        return webrtc.RTPCodecParameters{}, errors.New("no codecs available")
+    }
+    
+    // Start your media pipeline
+    go t.writeLoop(ctx.WriteStream())
+    
+    return codecs[0], nil
+}
+
+func (t *CustomTrack) Unbind(ctx webrtc.TrackLocalContext) error {
+    // Cleanup resources
+    return nil
+}
+
+func (t *CustomTrack) ID() string       { return t.id }
+func (t *CustomTrack) RID() string      { return "" }
+func (t *CustomTrack) StreamID() string { return t.streamID }
+func (t *CustomTrack) Kind() webrtc.RTPCodecType { return t.kind }
+
+func (t *CustomTrack) writeLoop(writer webrtc.TrackLocalWriter) {
+    // Your custom media writing logic
+}
+```
+
+## See Also
+
+- [RTPSender](/api/rtp-sender) - Manages outbound RTP streams
+- [TrackRemote](/api/track-remote) - Remote media track
+- [MediaEngine](/api/media-engine) - Codec configuration

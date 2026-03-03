@@ -1,0 +1,398 @@
+---
+title: Installation
+description: Install and configure Pion WebRTC for your Go project
+---
+
+## Prerequisites
+
+<Warning>
+Pion WebRTC v4 requires **Go 1.24.0 or later**. Make sure you have a compatible Go version installed.
+</Warning>
+
+<Steps>
+  <Step title="Check Go Version">
+    Verify your Go installation:
+    
+    ```bash
+    go version
+    ```
+    
+    You should see output like `go version go1.24.0` or higher.
+  </Step>
+  
+  <Step title="Enable Go Modules">
+    Go modules are mandatory for Pion WebRTC. Ensure they're enabled:
+    
+    ```bash
+    export GO111MODULE=on
+    ```
+    
+    <Tip>
+    In Go 1.16+, modules are enabled by default. You only need to set this if you're using an older version.
+    </Tip>
+  </Step>
+</Steps>
+
+## Install Pion WebRTC
+
+### Using Go Modules (Recommended)
+
+Add Pion WebRTC to your project with a single command:
+
+```bash
+go get github.com/pion/webrtc/v4
+```
+
+<Note>
+**Important**: Always specify the `/v4` suffix when importing. This ensures you get the latest v4 release.
+</Note>
+
+### Initialize a New Project
+
+If you're starting a new project:
+
+<CodeGroup>
+```bash Create Module
+mkdir my-webrtc-app
+cd my-webrtc-app
+go mod init my-webrtc-app
+```
+
+```bash Install Pion
+go get github.com/pion/webrtc/v4
+```
+
+```bash Verify Installation
+go list -m github.com/pion/webrtc/v4
+```
+</CodeGroup>
+
+## Version Management
+
+### Using Specific Versions
+
+To use a specific version of Pion WebRTC:
+
+```bash
+# Install latest v4.x release
+go get github.com/pion/webrtc/v4@latest
+
+# Install specific version
+go get github.com/pion/webrtc/v4@v4.0.0
+
+# Install from main branch (not recommended for production)
+go get github.com/pion/webrtc/v4@main
+```
+
+### Using v3 (Legacy)
+
+<Warning>
+If you're not ready to upgrade to v4, you can still use v3 releases:
+</Warning>
+
+```bash
+go get github.com/pion/webrtc/v3
+```
+
+Check the [v3 tags](https://github.com/pion/webrtc/tags) for the latest v3 release.
+
+## Dependencies
+
+Pion WebRTC automatically manages its dependencies through Go modules. Core dependencies include:
+
+<AccordionGroup>
+  <Accordion title="Core Pion Libraries">
+    - **pion/datachannel** (v1.6.0) - SCTP DataChannel implementation
+    - **pion/dtls/v3** (v3.1.2) - DTLS 1.2 protocol
+    - **pion/ice/v4** (v4.2.1) - ICE (Interactive Connectivity Establishment)
+    - **pion/interceptor** (v0.1.44) - RTP/RTCP interceptor framework
+    - **pion/rtp** (v1.10.1) - RTP packet processing
+    - **pion/rtcp** (v1.2.16) - RTCP packet processing
+    - **pion/sctp** (v1.9.2) - SCTP protocol implementation
+    - **pion/sdp/v3** (v3.0.18) - SDP parsing and generation
+    - **pion/srtp/v3** (v3.0.10) - SRTP encryption
+  </Accordion>
+  
+  <Accordion title="Network & Transport">
+    - **pion/stun/v3** (v3.1.1) - STUN protocol
+    - **pion/turn/v4** (v4.1.4) - TURN relay protocol
+    - **pion/transport/v4** (v4.0.1) - Network transport utilities
+  </Accordion>
+  
+  <Accordion title="Utilities">
+    - **pion/logging** (v0.2.4) - Logging interface
+    - **pion/randutil** (v0.1.0) - Random number utilities
+    - **golang.org/x/net** (v0.50.0) - Network extensions
+  </Accordion>
+</AccordionGroup>
+
+All dependencies are automatically downloaded when you run `go get` or `go build`.
+
+## Importing in Your Code
+
+Import Pion WebRTC in your Go files:
+
+```go
+package main
+
+import (
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create a PeerConnection configuration
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    // Create a new PeerConnection
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer peerConnection.Close()
+    
+    // Your WebRTC application code here
+}
+```
+
+<Tip>
+Always remember to specify `/v4` in your import path:
+```go
+import "github.com/pion/webrtc/v4" // ✅ Correct
+import "github.com/pion/webrtc"     // ❌ Incorrect
+```
+</Tip>
+
+## Additional Packages
+
+Pion provides additional packages for media handling:
+
+### Media Utilities
+
+For reading and writing media files:
+
+```bash
+go get github.com/pion/webrtc/v4/pkg/media
+```
+
+```go
+import (
+    "github.com/pion/webrtc/v4/pkg/media"
+    "github.com/pion/webrtc/v4/pkg/media/ivfreader"
+    "github.com/pion/webrtc/v4/pkg/media/oggreader"
+)
+```
+
+### Media Devices (Requires CGo)
+
+<Warning>
+The media devices package requires CGo and is only available on select platforms.
+</Warning>
+
+For capturing audio/video from hardware devices:
+
+```bash
+go get github.com/pion/mediadevices
+```
+
+## Platform-Specific Notes
+
+<Tabs>
+  <Tab title="Linux">
+    No additional dependencies required. Pion WebRTC works out of the box.
+    
+    ```bash
+    # Optional: Install media tools for testing
+    sudo apt-get install ffmpeg
+    ```
+  </Tab>
+  
+  <Tab title="macOS">
+    No additional dependencies required.
+    
+    ```bash
+    # Optional: Install media tools for testing
+    brew install ffmpeg
+    ```
+  </Tab>
+  
+  <Tab title="Windows">
+    No additional dependencies required. Pion WebRTC is pure Go with no CGo.
+    
+    Consider using [Chocolatey](https://chocolatey.org/) for installing media tools:
+    ```powershell
+    # Optional: Install media tools for testing
+    choco install ffmpeg
+    ```
+  </Tab>
+  
+  <Tab title="WebAssembly">
+    Pion supports WebAssembly compilation:
+    
+    ```bash
+    GOOS=js GOARCH=wasm go build -o app.wasm
+    ```
+    
+    See [WebAssembly Development](https://github.com/pion/webrtc/wiki/WebAssembly-Development-and-Testing) for details.
+  </Tab>
+  
+  <Tab title="Mobile">
+    Pion works on iOS and Android via [gomobile](https://pkg.go.dev/golang.org/x/mobile/cmd/gomobile):
+    
+    ```bash
+    # Install gomobile
+    go install golang.org/x/mobile/cmd/gomobile@latest
+    gomobile init
+    
+    # Build for Android
+    gomobile bind -target=android github.com/yourorg/yourapp
+    
+    # Build for iOS
+    gomobile bind -target=ios github.com/yourorg/yourapp
+    ```
+  </Tab>
+</Tabs>
+
+## Verify Installation
+
+Create a simple test file to verify your installation:
+
+<CodeGroup>
+```go main.go
+package main
+
+import (
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create a SettingEngine to check capabilities
+    s := webrtc.SettingEngine{}
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    
+    // Create a PeerConnection
+    config := webrtc.Configuration{}
+    pc, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    
+    fmt.Println("✅ Pion WebRTC installed successfully!")
+    fmt.Printf("📦 Connection State: %s\n", pc.ConnectionState())
+}
+```
+
+```bash Run
+go run main.go
+```
+</CodeGroup>
+
+Expected output:
+```
+✅ Pion WebRTC installed successfully!
+📦 Connection State: new
+```
+
+## Build Configuration
+
+### Optimized Builds
+
+For production builds, use optimizations:
+
+```bash
+# Standard build
+go build -o myapp
+
+# Optimized build (smaller binary)
+go build -ldflags="-s -w" -o myapp
+
+# With specific tags
+go build -tags=production -o myapp
+```
+
+### Build Times
+
+<Note>
+**Performance benchmarks** (on Intel Core i5-2520M @ 2.50GHz):
+- Time to build examples: **~0.28 seconds**
+- Time to run full test suite: **~77 seconds**
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Import path doesn't contain a hostname">
+    Make sure Go modules are enabled:
+    ```bash
+    export GO111MODULE=on
+    go mod init yourproject
+    go get github.com/pion/webrtc/v4
+    ```
+  </Accordion>
+  
+  <Accordion title="Cannot find module providing package">
+    Ensure you're using the correct import path with `/v4`:
+    ```go
+    import "github.com/pion/webrtc/v4" // Correct
+    ```
+  </Accordion>
+  
+  <Accordion title="Go version too old">
+    Pion WebRTC v4 requires Go 1.24.0+. Upgrade Go or use v3:
+    ```bash
+    # Check version
+    go version
+    
+    # Install Go 1.24+ or use v3
+    go get github.com/pion/webrtc/v3
+    ```
+  </Accordion>
+  
+  <Accordion title="Module checksum mismatch">
+    Clear your module cache and retry:
+    ```bash
+    go clean -modcache
+    go get github.com/pion/webrtc/v4
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quick Start Guide"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Build your first WebRTC application with a step-by-step tutorial
+  </Card>
+  <Card
+    title="Browse Examples"
+    icon="code"
+    href="https://github.com/pion/webrtc/tree/master/examples"
+  >
+    Explore 30+ working examples covering common use cases
+  </Card>
+  <Card
+    title="API Documentation"
+    icon="book"
+    href="https://pkg.go.dev/github.com/pion/webrtc/v4"
+  >
+    Dive into the complete API reference
+  </Card>
+  <Card
+    title="Join Community"
+    icon="discord"
+    href="https://discord.gg/PngbdqpFbt"
+  >
+    Get help and share your projects on Discord
+  </Card>
+</CardGroup>

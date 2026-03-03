@@ -1,0 +1,255 @@
+---
+title: API Overview
+description: Complete API reference for Pion WebRTC - a pure Go implementation of the WebRTC specification
+---
+
+## Introduction
+
+Pion WebRTC is a pure Go implementation of the WebRTC API. This reference documentation covers the core types and methods for building real-time peer-to-peer communication applications.
+
+## Core Components
+
+The Pion WebRTC API is organized around several key components:
+
+### API Configuration
+
+The foundation of customizing WebRTC behavior:
+
+<Card title="API" icon="gear" href="/api/api">
+  Configure PeerConnection with custom SettingEngine, MediaEngine, and Interceptors
+</Card>
+
+### Peer Connection
+
+The central interface for WebRTC connections:
+
+<Card title="PeerConnection" icon="network-wired" href="/api/peer-connection">
+  Establish peer-to-peer communications with media and data channels
+</Card>
+
+### Configuration
+
+Define connection parameters:
+
+<Card title="Configuration" icon="sliders" href="/api/configuration">
+  Configure ICE servers, transport policies, and certificates
+</Card>
+
+### Session Description
+
+Manage SDP offers and answers:
+
+<Card title="SessionDescription" icon="file-contract" href="/api/session-description">
+  Handle SDP negotiation for establishing connections
+</Card>
+
+## Architecture
+
+Pion WebRTC follows the standard WebRTC architecture:
+
+```
+┌─────────────────────────────────────────┐
+│           PeerConnection                │
+├─────────────────────────────────────────┤
+│  • RTP Transceivers (Media)             │
+│  • Data Channels (SCTP)                 │
+│  • ICE Transport (Connectivity)         │
+│  • DTLS Transport (Security)            │
+└─────────────────────────────────────────┘
+```
+
+## Quick Start
+
+<CodeGroup>
+```go Basic Connection
+package main
+
+import (
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create a new API with default settings
+    api := webrtc.NewAPI()
+    
+    // Configure the connection
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    
+    // Create a new PeerConnection
+    pc, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+    
+    // Add event handlers
+    pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+        if c != nil {
+            // Send candidate to remote peer
+        }
+    })
+}
+```
+
+```go With Custom Settings
+package main
+
+import (
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create API with custom MediaEngine
+    m := &webrtc.MediaEngine{}
+    if err := m.RegisterDefaultCodecs(); err != nil {
+        panic(err)
+    }
+    
+    // Create API with custom SettingEngine
+    s := webrtc.SettingEngine{}
+    
+    api := webrtc.NewAPI(
+        webrtc.WithMediaEngine(m),
+        webrtc.WithSettingEngine(s),
+    )
+    
+    config := webrtc.Configuration{}
+    pc, err := api.NewPeerConnection(config)
+    if err != nil {
+        panic(err)
+    }
+    defer pc.Close()
+}
+```
+</CodeGroup>
+
+## Key Concepts
+
+### Signaling
+
+Pion WebRTC handles media transport but requires external signaling to exchange:
+- Session descriptions (SDP offers/answers)
+- ICE candidates
+- Connection state
+
+### Media Handling
+
+The API provides:
+- **RTPTransceiver**: Bidirectional media streams
+- **RTPSender**: Outbound media
+- **RTPReceiver**: Inbound media
+- **TrackLocal/TrackRemote**: Audio/video tracks
+
+### Data Channels
+
+For non-media communication:
+- Reliable or unreliable delivery
+- Ordered or unordered messages
+- Custom protocols
+
+## Common Patterns
+
+<AccordionGroup>
+  <Accordion title="Creating an Offer">
+    ```go
+    offer, err := pc.CreateOffer(nil)
+    if err != nil {
+        return err
+    }
+    
+    err = pc.SetLocalDescription(offer)
+    if err != nil {
+        return err
+    }
+    
+    // Send offer to remote peer via signaling
+    ```
+  </Accordion>
+
+  <Accordion title="Handling an Answer">
+    ```go
+    // Receive answer from remote peer
+    answer := webrtc.SessionDescription{
+        Type: webrtc.SDPTypeAnswer,
+        SDP:  answerSDP,
+    }
+    
+    err := pc.SetRemoteDescription(answer)
+    if err != nil {
+        return err
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Adding Media Tracks">
+    ```go
+    // Create a video track
+    videoTrack, err := webrtc.NewTrackLocalStaticSample(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+        "video",
+        "pion",
+    )
+    if err != nil {
+        return err
+    }
+    
+    // Add track to connection
+    sender, err := pc.AddTrack(videoTrack)
+    if err != nil {
+        return err
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Creating Data Channels">
+    ```go
+    // Create a data channel
+    dc, err := pc.CreateDataChannel("chat", nil)
+    if err != nil {
+        return err
+    }
+    
+    dc.OnOpen(func() {
+        dc.SendText("Hello!")
+    })
+    
+    dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+        // Handle message
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Configuration" icon="gear" href="/api/api">
+    Learn how to configure the API with custom engines and interceptors
+  </Card>
+  
+  <Card title="PeerConnection" icon="network-wired" href="/api/peer-connection">
+    Explore PeerConnection methods and event handlers
+  </Card>
+  
+  <Card title="Configuration" icon="sliders" href="/api/configuration">
+    Configure ICE servers, policies, and certificates
+  </Card>
+  
+  <Card title="SessionDescription" icon="file-contract" href="/api/session-description">
+    Understand SDP types and session negotiation
+  </Card>
+</CardGroup>
+
+## Source Reference
+
+All API documentation is extracted from the actual Pion WebRTC source code:
+
+- **Package**: `github.com/pion/webrtc/v4`
+- **License**: MIT
+- **Copyright**: 2026 The Pion community

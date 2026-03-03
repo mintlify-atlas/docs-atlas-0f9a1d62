@@ -1,0 +1,397 @@
+---
+title: 'ICEGatherer'
+description: 'Gathers local host, server reflexive and relay ICE candidates for WebRTC connectivity'
+---
+
+## Overview
+
+The `ICEGatherer` gathers local host, server reflexive and relay candidates, as well as enabling the retrieval of local Interactive Connectivity Establishment (ICE) parameters which can be exchanged in signaling.
+
+<Note>
+This is part of the ORTC API. It is not meant to be used together with the basic WebRTC API.
+</Note>
+
+## Type Definition
+
+```go icegatherer.go
+type ICEGatherer struct {
+    // Contains internal state management for ICE gathering
+}
+```
+
+## Constructor
+
+### NewICEGatherer
+
+Creates a new ICEGatherer with the specified options.
+
+```go icegatherer.go
+func (api *API) NewICEGatherer(opts ICEGatherOptions) (*ICEGatherer, error)
+```
+
+<ParamField path="opts" type="ICEGatherOptions" required>
+  Configuration options for the ICE gatherer
+  
+  <Expandable title="ICEGatherOptions fields">
+    <ResponseField name="ICEServers" type="[]ICEServer">
+      List of ICE servers (STUN/TURN) to use for gathering
+    </ResponseField>
+    <ResponseField name="ICEGatherPolicy" type="ICETransportPolicy">
+      Policy for gathering candidates (all, relay, nohost)
+    </ResponseField>
+    <ResponseField name="ICECandidatePoolSize" type="uint8">
+      Size of the prefetched ICE pool
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="*ICEGatherer, error">
+  Returns a new ICEGatherer instance or an error if creation fails
+</ResponseField>
+
+**Example:**
+
+```go
+api := webrtc.NewAPI()
+gatherer, err := api.NewICEGatherer(webrtc.ICEGatherOptions{
+    ICEServers: []webrtc.ICEServer{
+        {
+            URLs: []string{"stun:stun.l.google.com:19302"},
+        },
+    },
+})
+if err != nil {
+    panic(err)
+}
+```
+
+## Methods
+
+### Gather
+
+Starts gathering ICE candidates.
+
+```go icegatherer.go
+func (g *ICEGatherer) Gather() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if gathering cannot be started
+</ResponseField>
+
+**Example:**
+
+```go
+err := gatherer.Gather()
+if err != nil {
+    panic(err)
+}
+```
+
+### GetLocalParameters
+
+Returns the ICE parameters of the ICEGatherer.
+
+```go icegatherer.go
+func (g *ICEGatherer) GetLocalParameters() (ICEParameters, error)
+```
+
+<ResponseField name="return" type="ICEParameters, error">
+  Returns the local ICE parameters (username fragment, password) or an error
+  
+  <Expandable title="ICEParameters structure">
+    <ResponseField name="UsernameFragment" type="string">
+      ICE username fragment
+    </ResponseField>
+    <ResponseField name="Password" type="string">
+      ICE password
+    </ResponseField>
+    <ResponseField name="ICELite" type="bool">
+      Whether ICE-lite mode is enabled
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```go
+params, err := gatherer.GetLocalParameters()
+if err != nil {
+    panic(err)
+}
+fmt.Printf("Username: %s, Password: %s\n", params.UsernameFragment, params.Password)
+```
+
+### GetLocalCandidates
+
+Returns the sequence of valid local candidates associated with the ICEGatherer.
+
+```go icegatherer.go
+func (g *ICEGatherer) GetLocalCandidates() ([]ICECandidate, error)
+```
+
+<ResponseField name="return" type="[]ICECandidate, error">
+  Returns a slice of local ICE candidates or an error
+</ResponseField>
+
+**Example:**
+
+```go
+candidates, err := gatherer.GetLocalCandidates()
+if err != nil {
+    panic(err)
+}
+for _, candidate := range candidates {
+    fmt.Printf("Candidate: %s\n", candidate.String())
+}
+```
+
+### State
+
+Returns the current state of the ICE gatherer.
+
+```go icegatherer.go
+func (g *ICEGatherer) State() ICEGathererState
+```
+
+<ResponseField name="return" type="ICEGathererState">
+  The current ICE gatherer state (New, Gathering, Complete, Closed)
+</ResponseField>
+
+**Example:**
+
+```go
+state := gatherer.State()
+fmt.Printf("Gatherer state: %s\n", state)
+```
+
+### OnLocalCandidate
+
+Sets an event handler which fires when a new local ICE candidate is available.
+
+<Warning>
+The handler will be called with a nil pointer when gathering is finished.
+</Warning>
+
+```go icegatherer.go
+func (g *ICEGatherer) OnLocalCandidate(f func(*ICECandidate))
+```
+
+<ParamField path="f" type="func(*ICECandidate)" required>
+  Callback function that receives ICE candidates. Called with nil when gathering completes.
+</ParamField>
+
+**Example:**
+
+```go
+gatherer.OnLocalCandidate(func(candidate *ICECandidate) {
+    if candidate == nil {
+        fmt.Println("Gathering complete")
+        return
+    }
+    fmt.Printf("New candidate: %s\n", candidate.String())
+})
+```
+
+### OnStateChange
+
+Sets a handler that fires when the ICEGatherer state changes.
+
+```go icegatherer.go
+func (g *ICEGatherer) OnStateChange(f func(ICEGathererState))
+```
+
+<ParamField path="f" type="func(ICEGathererState)" required>
+  Callback function that receives state change notifications
+</ParamField>
+
+**Example:**
+
+```go
+gatherer.OnStateChange(func(state webrtc.ICEGathererState) {
+    fmt.Printf("Gatherer state changed to: %s\n", state)
+})
+```
+
+### Close
+
+Prunes all local candidates and closes the ports.
+
+```go icegatherer.go
+func (g *ICEGatherer) Close() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if closing fails
+</ResponseField>
+
+**Example:**
+
+```go
+err := gatherer.Close()
+if err != nil {
+    panic(err)
+}
+```
+
+### GracefulClose
+
+Prunes all local candidates and closes the ports, waiting for goroutines to complete.
+
+<Warning>
+This is only safe to call outside of ICEGatherer callbacks or if in a callback, in its own goroutine.
+</Warning>
+
+```go icegatherer.go
+func (g *ICEGatherer) GracefulClose() error
+```
+
+<ResponseField name="return" type="error">
+  Returns nil on success, or an error if closing fails
+</ResponseField>
+
+**Example:**
+
+```go
+go func() {
+    err := gatherer.GracefulClose()
+    if err != nil {
+        log.Printf("Error closing gatherer: %v", err)
+    }
+}()
+```
+
+## Related Types
+
+### ICEAddressRewriteRule
+
+Represents a rule for remapping candidate addresses.
+
+```go icegatherer.go
+type ICEAddressRewriteRule struct {
+    External        []string
+    Local           string
+    Iface           string
+    CIDR            string
+    AsCandidateType ICECandidateType
+    Mode            ICEAddressRewriteMode
+    Networks        []NetworkType
+}
+```
+
+<ParamField path="External" type="[]string">
+  External IP addresses to use
+</ParamField>
+
+<ParamField path="Local" type="string">
+  Local IP address to match
+</ParamField>
+
+<ParamField path="Iface" type="string">
+  Network interface name to match
+</ParamField>
+
+<ParamField path="CIDR" type="string">
+  CIDR notation to match local addresses
+</ParamField>
+
+<ParamField path="AsCandidateType" type="ICECandidateType">
+  Type to use for rewritten candidates
+</ParamField>
+
+<ParamField path="Mode" type="ICEAddressRewriteMode">
+  Whether to replace or append candidates
+</ParamField>
+
+<ParamField path="Networks" type="[]NetworkType">
+  Network types to apply this rule to
+</ParamField>
+
+### ICEAddressRewriteMode
+
+Controls whether a rule replaces or appends candidates.
+
+```go icegatherer.go
+type ICEAddressRewriteMode byte
+
+const (
+    ICEAddressRewriteModeUnspecified ICEAddressRewriteMode = iota
+    ICEAddressRewriteReplace
+    ICEAddressRewriteAppend
+)
+```
+
+## States
+
+The ICEGatherer can be in one of the following states:
+
+- **ICEGathererStateNew**: Initial state
+- **ICEGathererStateGathering**: Currently gathering candidates
+- **ICEGathererStateComplete**: Gathering has completed
+- **ICEGathererStateClosed**: Gatherer has been closed
+
+## Usage Example
+
+<CodeGroup>
+```go Complete Example
+package main
+
+import (
+    "fmt"
+    "github.com/pion/webrtc/v4"
+)
+
+func main() {
+    // Create API
+    api := webrtc.NewAPI()
+    
+    // Create ICE gatherer with STUN server
+    gatherer, err := api.NewICEGatherer(webrtc.ICEGatherOptions{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    })
+    if err != nil {
+        panic(err)
+    }
+    defer gatherer.Close()
+    
+    // Set up event handlers
+    gatherer.OnLocalCandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate == nil {
+            fmt.Println("Gathering complete")
+            return
+        }
+        fmt.Printf("New candidate: %s\n", candidate.String())
+    })
+    
+    gatherer.OnStateChange(func(state webrtc.ICEGathererState) {
+        fmt.Printf("State changed: %s\n", state)
+    })
+    
+    // Start gathering
+    if err = gatherer.Gather(); err != nil {
+        panic(err)
+    }
+    
+    // Get local parameters
+    params, err := gatherer.GetLocalParameters()
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("ICE Parameters - User: %s, Pass: %s\n", 
+        params.UsernameFragment, params.Password)
+    
+    // Wait for gathering to complete...
+    select {}
+}
+```
+</CodeGroup>
+
+## See Also
+
+- [ICETransport](/api/ice-transport) - Manages ICE connectivity
+- [DTLSTransport](/api/dtls-transport) - Handles DTLS encryption over ICE
+- [PeerConnection](/api/peer-connection) - High-level WebRTC API

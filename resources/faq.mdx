@@ -1,0 +1,420 @@
+---
+title: Frequently Asked Questions
+description: Common questions and answers about Pion WebRTC
+---
+
+## General Questions
+
+<AccordionGroup>
+  <Accordion title="What is Pion WebRTC?">
+    Pion WebRTC is a pure Go implementation of the WebRTC API. It allows you to build real-time communication applications in Go without requiring Cgo or external C libraries.
+    
+    Key features:
+    - **Pure Go**: No Cgo dependencies, easy cross-compilation
+    - **Portable**: Works on Windows, macOS, Linux, FreeBSD, iOS, Android, and WebAssembly
+    - **Standards Compliant**: Implements W3C WebRTC specifications
+    - **Production Ready**: Used by many projects in production
+  </Accordion>
+
+  <Accordion title="Why use Pion WebRTC instead of other WebRTC libraries?">
+    Pion offers several advantages:
+    
+    - **Easy to Build**: Simple `go build` command, no complex build systems
+    - **Cross-Platform**: Compile once, run anywhere Go runs
+    - **No Dependencies**: Pure Go means no external library dependencies
+    - **Flexible**: Direct access to RTP/RTCP for custom media processing
+    - **Well Documented**: Extensive examples and API documentation
+    - **Active Community**: Regular updates and helpful community support
+  </Accordion>
+
+  <Accordion title="Is Pion WebRTC production-ready?">
+    Yes! Pion WebRTC is used in production by many companies and projects. It's actively maintained, has comprehensive test coverage, and follows WebRTC standards closely.
+    
+    See [awesome-pion](https://github.com/pion/awesome-pion) for real-world usage examples.
+  </Accordion>
+
+  <Accordion title="What's the difference between v3 and v4?">
+    Version 4 includes dependency updates, performance improvements, and bug fixes. The core API remains similar, but import paths change from `/v3` to `/v4`.
+    
+    See the [Migration Guide](/resources/migration-v4) for detailed upgrade instructions.
+  </Accordion>
+</AccordionGroup>
+
+## Getting Started
+
+<AccordionGroup>
+  <Accordion title="How do I install Pion WebRTC?">
+    Using Go modules (required):
+    
+    ```bash
+    export GO111MODULE=on
+    go get github.com/pion/webrtc/v4
+    ```
+    
+    Then import in your code:
+    
+    ```go
+    import "github.com/pion/webrtc/v4"
+    ```
+  </Accordion>
+
+  <Accordion title="Where can I find examples?">
+    Pion provides extensive examples:
+    
+    - **Basic Examples**: [github.com/pion/webrtc/examples](https://github.com/pion/webrtc/tree/master/examples)
+    - **Advanced Applications**: [github.com/pion/example-webrtc-applications](https://github.com/pion/example-webrtc-applications)
+    - **Real Projects**: [github.com/pion/awesome-pion](https://github.com/pion/awesome-pion)
+    
+    To run examples locally:
+    
+    ```bash
+    git clone https://github.com/pion/webrtc.git
+    cd webrtc/examples
+    go run examples.go
+    ```
+    
+    Then browse to http://localhost
+  </Accordion>
+
+  <Accordion title="Do I need to know WebRTC to use Pion?">
+    Basic understanding helps, but Pion provides:
+    
+    - [WebRTC for the Curious](https://webrtcforthecurious.com) - Free book about WebRTC
+    - Extensive code examples with comments
+    - Active community for questions
+    - API that matches browser WebRTC (if you know browser WebRTC, you know Pion)
+  </Accordion>
+
+  <Accordion title="What Go version do I need?">
+    Pion WebRTC v4 requires Go 1.24.0 or later. Check your version:
+    
+    ```bash
+    go version
+    ```
+    
+    Update Go if needed from [golang.org/dl](https://golang.org/dl/)
+  </Accordion>
+</AccordionGroup>
+
+## Media Handling
+
+<AccordionGroup>
+  <Accordion title="What media codecs are supported?">
+    Pion WebRTC supports:
+    
+    **Video**:
+    - H.264
+    - VP8
+    - VP9
+    - AV1
+    
+    **Audio**:
+    - Opus
+    - PCM
+    
+    Pion provides packetizers for these codecs. You can also implement custom packetizers for other formats.
+  </Accordion>
+
+  <Accordion title="How do I send video from a file?">
+    Use the `play-from-disk` example as a starting point:
+    
+    1. Read video file (IVF, H264, etc.)
+    2. Create a track
+    3. Add track to PeerConnection
+    4. Read and send packets
+    
+    Example: [play-from-disk](https://github.com/pion/webrtc/tree/master/examples/play-from-disk)
+  </Accordion>
+
+  <Accordion title="Can I use FFmpeg with Pion?">
+    Yes! You can pipe FFmpeg output to Pion or process FFmpeg output in Go.
+    
+    Common approaches:
+    - Use FFmpeg to decode/encode media
+    - Pipe RTP output from FFmpeg to Pion
+    - Use Go FFmpeg bindings for processing
+    
+    See [rtp-to-webrtc example](https://github.com/pion/webrtc/tree/master/examples/rtp-to-webrtc)
+  </Accordion>
+
+  <Accordion title="How do I save received media to disk?">
+    Use the `save-to-disk` example:
+    
+    ```go
+    track, err := peerConnection.AddTrack(videoTrack)
+    // Handle incoming track
+    peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+        // Save to IVF, Ogg, or other format
+    })
+    ```
+    
+    Example: [save-to-disk](https://github.com/pion/webrtc/tree/master/examples/save-to-disk)
+  </Accordion>
+
+  <Accordion title="Can I access raw RTP packets?">
+    Yes! Pion gives you direct RTP/RTCP access:
+    
+    ```go
+    peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+        for {
+            rtp, _, err := track.ReadRTP()
+            // Process raw RTP packet
+        }
+    })
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Connectivity & NAT Traversal
+
+<AccordionGroup>
+  <Accordion title="Do I need a TURN server?">
+    It depends on your network setup:
+    
+    - **Local Network**: No TURN needed
+    - **Same Network/No Firewall**: STUN may be sufficient
+    - **Behind NAT/Firewall**: TURN server recommended
+    - **Production**: Always include TURN servers
+    
+    Configure TURN:
+    
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "user",
+                Credential: "pass",
+            },
+        },
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="How do I use a single port for multiple connections?">
+    Use the SettingEngine to configure a single UDP port:
+    
+    ```go
+    s := webrtc.SettingEngine{}
+    s.SetEphemeralUDPPortRange(8000, 8000)
+    api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+    ```
+    
+    See [ice-single-port example](https://github.com/pion/webrtc/tree/master/examples/ice-single-port)
+  </Accordion>
+
+  <Accordion title="Can I use TCP instead of UDP?">
+    Yes! Configure ICE to use TCP:
+    
+    ```go
+    s := webrtc.SettingEngine{}
+    s.SetNetworkTypes([]webrtc.NetworkType{
+        webrtc.NetworkTypeTCP4,
+        webrtc.NetworkTypeTCP6,
+    })
+    ```
+    
+    See [ice-tcp example](https://github.com/pion/webrtc/tree/master/examples/ice-tcp)
+  </Accordion>
+
+  <Accordion title="What is Trickle ICE and should I use it?">
+    Trickle ICE allows ICE candidates to be sent incrementally instead of waiting for all candidates before starting negotiation.
+    
+    **Benefits**:
+    - Faster connection establishment
+    - Better user experience
+    - Recommended for production
+    
+    See [trickle-ice example](https://github.com/pion/webrtc/tree/master/examples/trickle-ice)
+  </Accordion>
+</AccordionGroup>
+
+## Data Channels
+
+<AccordionGroup>
+  <Accordion title="How do I send data between peers?">
+    Use DataChannels for bidirectional data transfer:
+    
+    ```go
+    dataChannel, err := peerConnection.CreateDataChannel("data", nil)
+    dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+        fmt.Printf("Message: %s\n", string(msg.Data))
+    })
+    dataChannel.OnOpen(func() {
+        dataChannel.SendText("Hello!")
+    })
+    ```
+    
+    See [data-channels example](https://github.com/pion/webrtc/tree/master/examples/data-channels)
+  </Accordion>
+
+  <Accordion title="What's the difference between ordered/unordered and reliable/unreliable?">
+    Configure these settings when creating a DataChannel:
+    
+    - **Ordered**: Messages arrive in the order sent (default: true)
+    - **Unordered**: Messages may arrive out of order (lower latency)
+    - **Reliable**: Messages guaranteed to arrive (uses retransmission)
+    - **Unreliable**: Messages may be lost (lower latency)
+    
+    ```go
+    ordered := false
+    maxRetransmits := uint16(0)
+    dataChannel, err := peerConnection.CreateDataChannel("data", &webrtc.DataChannelInit{
+        Ordered:        &ordered,
+        MaxRetransmits: &maxRetransmits,
+    })
+    ```
+  </Accordion>
+
+  <Accordion title="How do I handle backpressure in DataChannels?">
+    Monitor buffered amount to implement flow control:
+    
+    ```go
+    if dataChannel.BufferedAmount() > 1024*1024 {
+        // Wait before sending more
+    }
+    ```
+    
+    See [data-channels-flow-control example](https://github.com/pion/webrtc/tree/master/examples/data-channels-flow-control)
+  </Accordion>
+</AccordionGroup>
+
+## Deployment & Performance
+
+<AccordionGroup>
+  <Accordion title="How do I optimize performance?">
+    Best practices:
+    
+    - Use interceptors for custom processing
+    - Pool buffers to reduce GC pressure
+    - Use Pion's media libraries (IVF, Ogg readers/writers)
+    - Monitor memory usage and optimize hot paths
+    - Use single port configuration in production
+    - Enable hardware acceleration for supported ciphers
+  </Accordion>
+
+  <Accordion title="Can I run Pion in Docker?">
+    Yes! Pion works well in containers:
+    
+    - Expose necessary UDP/TCP ports
+    - Configure ICE servers properly
+    - Use host networking or proper port mapping
+    - Consider TURN for NAT traversal
+  </Accordion>
+
+  <Accordion title="Does Pion support clustering/load balancing?">
+    Pion itself is a library, but you can build clustered systems:
+    
+    - Use TURN servers for media relay
+    - Implement signaling server with load balancing
+    - Use service mesh for connection distribution
+    - See community projects for SFU implementations
+  </Accordion>
+
+  <Accordion title="How many concurrent connections can Pion handle?">
+    This depends on:
+    
+    - Server resources (CPU, memory, bandwidth)
+    - Media bitrate and complexity
+    - Whether you're using SFU/MCU architecture
+    
+    Pion has been tested with thousands of concurrent connections. Use benchmarking tools like [rtsp-bench](https://github.com/pion/rtsp-bench) to test your specific use case.
+  </Accordion>
+</AccordionGroup>
+
+## Debugging & Development
+
+<AccordionGroup>
+  <Accordion title="How do I enable debug logging?">
+    Pion uses the `pion/logging` interface:
+    
+    ```go
+    import "github.com/pion/logging"
+    
+    s := webrtc.SettingEngine{}
+    s.LoggerFactory = logging.NewDefaultLoggerFactory()
+    api := webrtc.NewAPI(
+        webrtc.WithSettingEngine(s),
+    )
+    ```
+    
+    See [custom-logger example](https://github.com/pion/webrtc/tree/master/examples/custom-logger)
+  </Accordion>
+
+  <Accordion title="What tools help debug WebRTC issues?">
+    Useful debugging tools:
+    
+    - **chrome://webrtc-internals**: Chrome's built-in WebRTC debugging
+    - **Wireshark**: Packet capture and analysis
+    - **Pion's logging**: Enable debug logs
+    - **Stats API**: Monitor connection statistics
+    
+    ```go
+    stats := peerConnection.GetStats()
+    ```
+  </Accordion>
+
+  <Accordion title="How do I test WebRTC applications?">
+    Testing strategies:
+    
+    - Unit tests for business logic
+    - Integration tests with virtual networks (vnet)
+    - Browser automation with tools like Selenium
+    - Load testing with benchmarking tools
+    
+    See [vnet example](https://github.com/pion/webrtc/tree/master/examples/vnet) for network simulation
+  </Accordion>
+</AccordionGroup>
+
+## Platform-Specific
+
+<AccordionGroup>
+  <Accordion title="Can I use Pion on mobile devices?">
+    Yes! Pion supports iOS and Android:
+    
+    - Compile using `gomobile`
+    - Pure Go means no platform-specific build issues
+    - Used in production mobile apps
+  </Accordion>
+
+  <Accordion title="Does Pion work with WebAssembly?">
+    Yes! Pion can be compiled to WebAssembly:
+    
+    ```bash
+    GOOS=js GOARCH=wasm go build -o demo.wasm
+    ```
+    
+    In WASM mode, Pion acts as a wrapper around the browser's WebRTC API, allowing you to use the same Go code in browser and server.
+    
+    See [examples with WASM support](https://github.com/pion/webrtc/tree/master/examples)
+  </Accordion>
+
+  <Accordion title="Can I use Pion with gRPC or other Go frameworks?">
+    Absolutely! Pion is a standard Go library:
+    
+    - Use with any Go web framework (Gin, Echo, Fiber, etc.)
+    - Integrate with gRPC for signaling
+    - Combine with other Go libraries
+    - No special requirements or conflicts
+  </Accordion>
+</AccordionGroup>
+
+## Still Have Questions?
+
+<CardGroup cols={2}>
+  <Card title="Community" icon="users" href="/resources/community">
+    Ask questions in Discord or GitHub Discussions
+  </Card>
+  <Card title="Troubleshooting" icon="wrench" href="/resources/troubleshooting">
+    Common issues and solutions
+  </Card>
+  <Card title="Examples" icon="code" href="https://github.com/pion/webrtc/tree/master/examples">
+    Browse code examples
+  </Card>
+  <Card title="API Reference" icon="book" href="https://pkg.go.dev/github.com/pion/webrtc/v4">
+    Complete API documentation
+  </Card>
+</CardGroup>

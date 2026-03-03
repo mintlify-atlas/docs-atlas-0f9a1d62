@@ -1,0 +1,655 @@
+---
+title: Troubleshooting Guide
+description: Common issues and solutions for Pion WebRTC
+---
+
+## Installation Issues
+
+### Go Modules Not Enabled
+
+<Warning>
+Go Modules are mandatory for using Pion WebRTC.
+</Warning>
+
+**Symptom**: Import errors or `cannot find package` errors
+
+**Solution**:
+
+```bash
+export GO111MODULE=on
+go mod init your-project-name
+go get github.com/pion/webrtc/v4
+```
+
+### Version Conflicts
+
+**Symptom**: Dependency resolution errors or incompatible versions
+
+**Solution**:
+
+```bash
+# Clean module cache
+go clean -modcache
+
+# Update dependencies
+go get -u ./...
+go mod tidy
+
+# Verify versions
+go list -m all | grep pion
+```
+
+### Build Failures
+
+**Symptom**: Compilation errors after installation
+
+**Solution**:
+
+1. Ensure you're using Go 1.24.0 or later:
+   ```bash
+   go version
+   ```
+
+2. Verify import paths include the version:
+   ```go
+   import "github.com/pion/webrtc/v4" // Correct
+   import "github.com/pion/webrtc"    // Incorrect
+   ```
+
+3. Clear build cache:
+   ```bash
+   go clean -cache
+   go build
+   ```
+
+## Connection Issues
+
+### ICE Connection Fails
+
+**Symptom**: PeerConnection stays in "checking" or "failed" state
+
+<AccordionGroup>
+  <Accordion title="Check #1: Network Configuration">
+    Verify your ICE servers are configured:
+    
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+        },
+    }
+    peerConnection, err := webrtc.NewPeerConnection(config)
+    ```
+  </Accordion>
+
+  <Accordion title="Check #2: Firewall & NAT">
+    Common issues:
+    
+    - Firewall blocking UDP traffic
+    - Symmetric NAT requiring TURN
+    - Corporate network restrictions
+    
+    **Solution**: Add TURN server
+    
+    ```go
+    config := webrtc.Configuration{
+        ICEServers: []webrtc.ICEServer{
+            {
+                URLs: []string{"stun:stun.l.google.com:19302"},
+            },
+            {
+                URLs:       []string{"turn:turn.example.com:3478"},
+                Username:   "username",
+                Credential: "password",
+            },
+        },
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Check #3: Port Availability">
+    Verify ports are not blocked:
+    
+    ```bash
+    # Test STUN connectivity
+    nc -u -v stun.l.google.com 19302
+    
+    # Check if ports are available
+    netstat -an | grep LISTEN
+    ```
+  </Accordion>
+
+  <Accordion title="Check #4: ICE Candidates">
+    Monitor ICE candidate gathering:
+    
+    ```go
+    peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+        if candidate != nil {
+            log.Printf("ICE Candidate: %s", candidate.String())
+        } else {
+            log.Printf("ICE Gathering Complete")
+        }
+    })
+    ```
+    
+    If no candidates are gathered, check network interfaces.
+  </Accordion>
+</AccordionGroup>
+
+### Connection Timeouts
+
+**Symptom**: Connection takes too long or times out
+
+**Solutions**:
+
+1. **Implement Trickle ICE**:
+   ```go
+   peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+       if candidate != nil {
+           // Send candidate immediately, don't wait for all
+           sendCandidateToRemotePeer(candidate)
+       }
+   })
+   ```
+
+2. **Set Timeout Values**:
+   ```go
+   s := webrtc.SettingEngine{}
+   s.SetICETimeouts(
+       5*time.Second,  // Disconnect timeout
+       10*time.Second, // Failed timeout
+       2*time.Second,  // Keepalive interval
+   )
+   ```
+
+### Signaling Issues
+
+**Symptom**: Offer/Answer exchange fails
+
+<Note>
+Signaling is not part of the WebRTC specification and must be implemented separately.
+</Note>
+
+**Common Mistakes**:
+
+1. **Not waiting for gathering**:
+   ```go
+   // Wrong - creates offer immediately
+   offer, _ := peerConnection.CreateOffer(nil)
+   
+   // Correct - wait for ICE gathering if not using Trickle ICE
+   gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
+   offer, _ := peerConnection.CreateOffer(nil)
+   peerConnection.SetLocalDescription(offer)
+   <-gatherComplete
+   // Now send offer
+   ```
+
+2. **Setting remote description before local**:
+   ```go
+   // Ensure proper ordering
+   // 1. Create offer/answer
+   // 2. Set local description
+   // 3. Send to remote peer
+   // 4. Receive from remote peer
+   // 5. Set remote description
+   ```
+
+## Media Issues
+
+### No Audio/Video Received
+
+**Symptom**: Connection established but no media flows
+
+<AccordionGroup>
+  <Accordion title="Track Handler Not Set">
+    Ensure OnTrack handler is registered:
+    
+    ```go
+    peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+        log.Printf("Track received: %s", track.Codec().MimeType)
+        
+        for {
+            rtp, _, err := track.ReadRTP()
+            if err != nil {
+                return
+            }
+            // Process RTP packet
+        }
+    })
+    ```
+    
+    <Warning>
+    OnTrack must be set BEFORE creating the answer or setting remote description.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Codec Mismatch">
+    Verify both peers support the same codecs:
+    
+    ```go
+    // Check supported codecs
+    capabilities := webrtc.RTPCodecCapability{
+        MimeType: webrtc.MimeTypeH264,
+    }
+    
+    // Or use SettingEngine to restrict codecs
+    m := &webrtc.MediaEngine{}
+    m.RegisterCodec(webrtc.RTPCodecParameters{
+        RTPCodecCapability: webrtc.RTPCodecCapability{
+            MimeType: webrtc.MimeTypeH264,
+        },
+    }, webrtc.RTPCodecTypeVideo)
+    ```
+  </Accordion>
+
+  <Accordion title="Track Not Added">
+    Ensure tracks are properly added:
+    
+    ```go
+    // Create track
+    videoTrack, err := webrtc.NewTrackLocalStaticSample(
+        webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264},
+        "video",
+        "pion",
+    )
+    if err != nil {
+        return err
+    }
+    
+    // Add to PeerConnection
+    rtpSender, err := peerConnection.AddTrack(videoTrack)
+    if err != nil {
+        return err
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Poor Video Quality
+
+**Symptom**: Choppy video, artifacts, or low frame rate
+
+**Solutions**:
+
+1. **Check Bandwidth**:
+   ```go
+   peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+       if state == webrtc.PeerConnectionStateConnected {
+           stats := peerConnection.GetStats()
+           // Analyze bandwidth statistics
+       }
+   })
+   ```
+
+2. **Adjust Bitrate**:
+   ```go
+   // Use SettingEngine to configure bitrate
+   s := webrtc.SettingEngine{}
+   api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+   ```
+
+3. **Enable NACK/FEC**:
+   ```go
+   m := &webrtc.MediaEngine{}
+   m.RegisterCodec(webrtc.RTPCodecParameters{
+       RTPCodecCapability: webrtc.RTPCodecCapability{
+           MimeType:    webrtc.MimeTypeH264,
+           ClockRate:   90000,
+           SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+       },
+   }, webrtc.RTPCodecTypeVideo)
+   ```
+
+### Audio/Video Out of Sync
+
+**Symptom**: Audio and video timestamps don't match
+
+**Solution**:
+
+Ensure proper timestamp handling:
+
+```go
+startTime := time.Now()
+
+// For video
+videoSample := media.Sample{
+    Data:               videoData,
+    Duration:           time.Millisecond * 33, // 30fps
+    Timestamp:          time.Since(startTime),
+}
+videoTrack.WriteSample(videoSample)
+
+// For audio - use synchronized timestamp
+audioSample := media.Sample{
+    Data:      audioData,
+    Duration:  time.Millisecond * 20,
+    Timestamp: time.Since(startTime),
+}
+audioTrack.WriteSample(audioSample)
+```
+
+## Data Channel Issues
+
+### Data Channel Not Opening
+
+**Symptom**: OnOpen callback never fires
+
+**Checklist**:
+
+1. Ensure both peers create or handle the data channel
+2. Wait for connection to be established
+3. Check for errors
+
+```go
+// Peer A - Creates channel
+dataChannel, err := peerConnection.CreateDataChannel("data", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+dataChannel.OnOpen(func() {
+    log.Println("Data channel opened")
+})
+
+dataChannel.OnError(func(err error) {
+    log.Printf("Data channel error: %v", err)
+})
+
+// Peer B - Handles channel
+peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
+    log.Printf("New DataChannel: %s", d.Label())
+    
+    d.OnOpen(func() {
+        log.Println("Data channel opened")
+    })
+})
+```
+
+### Message Send Failures
+
+**Symptom**: SendText or Send returns an error
+
+**Common Causes**:
+
+1. **Channel not open**:
+   ```go
+   if dataChannel.ReadyState() != webrtc.DataChannelStateOpen {
+       log.Println("Channel not open yet")
+       return
+   }
+   err := dataChannel.SendText("message")
+   ```
+
+2. **Buffer overflow**:
+   ```go
+   // Check buffered amount
+   if dataChannel.BufferedAmount() > 16*1024*1024 {
+       log.Println("Buffer full, waiting...")
+       time.Sleep(100 * time.Millisecond)
+   }
+   dataChannel.SendText("message")
+   ```
+
+3. **Message too large**:
+   ```go
+   // SCTP has message size limits (typically 256KB)
+   // Send large data in chunks
+   maxMessageSize := 64 * 1024
+   for i := 0; i < len(data); i += maxMessageSize {
+       end := i + maxMessageSize
+       if end > len(data) {
+           end = len(data)
+       }
+       dataChannel.Send(data[i:end])
+   }
+   ```
+
+## Performance Issues
+
+### High CPU Usage
+
+**Symptom**: Excessive CPU consumption
+
+**Solutions**:
+
+1. **Profile your application**:
+   ```go
+   import _ "net/http/pprof"
+   
+   go func() {
+       log.Println(http.ListenAndServe("localhost:6060", nil))
+   }()
+   ```
+   
+   Then visit: http://localhost:6060/debug/pprof/
+
+2. **Optimize packet processing**:
+   ```go
+   // Use buffered channels
+   packetChan := make(chan *rtp.Packet, 100)
+   
+   // Batch processing
+   ticker := time.NewTicker(10 * time.Millisecond)
+   for range ticker.C {
+       // Process accumulated packets
+   }
+   ```
+
+3. **Reduce logging**:
+   ```go
+   // Disable verbose logging in production
+   s := webrtc.SettingEngine{}
+   s.LoggerFactory = nil // Or use custom logger with filtering
+   ```
+
+### Memory Leaks
+
+**Symptom**: Growing memory usage over time
+
+**Common Causes**:
+
+1. **Not closing PeerConnections**:
+   ```go
+   defer peerConnection.Close()
+   ```
+
+2. **Goroutine leaks**:
+   ```go
+   // Always ensure goroutines can exit
+   ctx, cancel := context.WithCancel(context.Background())
+   defer cancel()
+   
+   go func() {
+       for {
+           select {
+           case <-ctx.Done():
+               return
+           default:
+               // Process
+           }
+       }
+   }()
+   ```
+
+3. **Track reader not stopping**:
+   ```go
+   peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+       go func() {
+           defer func() {
+               log.Println("Track reader exiting")
+           }()
+           
+           for {
+               _, _, err := track.ReadRTP()
+               if err != nil {
+                   return // Exit on error
+               }
+           }
+       }()
+   })
+   ```
+
+### High Memory Usage
+
+**Solutions**:
+
+1. **Pool buffers**:
+   ```go
+   var bufferPool = sync.Pool{
+       New: func() interface{} {
+           return make([]byte, 1500)
+       },
+   }
+   
+   buffer := bufferPool.Get().([]byte)
+   defer bufferPool.Put(buffer)
+   ```
+
+2. **Limit concurrent connections**:
+   ```go
+   semaphore := make(chan struct{}, 100) // Max 100 connections
+   
+   semaphore <- struct{}{}
+   defer func() { <-semaphore }()
+   ```
+
+## Debugging Tips
+
+### Enable Debug Logging
+
+```go
+import "github.com/pion/logging"
+
+logger := logging.NewDefaultLoggerFactory()
+
+s := webrtc.SettingEngine{}
+s.LoggerFactory = logger
+api := webrtc.NewAPI(webrtc.WithSettingEngine(s))
+```
+
+### Monitor Connection State
+
+```go
+peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+    log.Printf("Connection State: %s", state.String())
+    
+    switch state {
+    case webrtc.PeerConnectionStateFailed:
+        log.Println("Connection failed")
+        // Debug ICE state
+    case webrtc.PeerConnectionStateClosed:
+        log.Println("Connection closed")
+    }
+})
+
+peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+    log.Printf("ICE State: %s", state.String())
+})
+```
+
+### Use Wireshark
+
+Capture and analyze WebRTC traffic:
+
+```bash
+# Capture STUN/TURN traffic
+sudo tcpdump -i any -w webrtc.pcap udp port 3478 or udp port 19302
+
+# Analyze in Wireshark with filters:
+# stun
+# rtp
+# rtcp
+```
+
+### Check Statistics
+
+```go
+stats := peerConnection.GetStats()
+for _, stat := range stats {
+    switch s := stat.(type) {
+    case *webrtc.InboundRTPStreamStats:
+        log.Printf("Inbound: packets=%d, bytes=%d, lost=%d",
+            s.PacketsReceived, s.BytesReceived, s.PacketsLost)
+    case *webrtc.OutboundRTPStreamStats:
+        log.Printf("Outbound: packets=%d, bytes=%d",
+            s.PacketsSent, s.BytesSent)
+    }
+}
+```
+
+## Platform-Specific Issues
+
+### Docker Networking
+
+**Symptom**: Connections fail in Docker containers
+
+**Solution**:
+
+1. Use host networking:
+   ```bash
+   docker run --network host your-image
+   ```
+
+2. Or properly map ports:
+   ```bash
+   docker run -p 8080:8080 -p 50000-50010:50000-50010/udp your-image
+   ```
+
+3. Set NAT 1:1 mapping:
+   ```go
+   s := webrtc.SettingEngine{}
+   s.SetNAT1To1IPs([]string{"your.public.ip"}, webrtc.ICECandidateTypeHost)
+   ```
+
+### WebAssembly Issues
+
+**Symptom**: WASM build or runtime errors
+
+**Solution**:
+
+1. Use correct build command:
+   ```bash
+   GOOS=js GOARCH=wasm go build -o demo.wasm main.go
+   ```
+
+2. Include wasm_exec.js:
+   ```bash
+   cp "$(go env GOROOT)/misc/wasm/wasm_exec.js" .
+   ```
+
+3. Serve with proper MIME type:
+   ```go
+   // In your HTTP server
+   if strings.HasSuffix(path, ".wasm") {
+       w.Header().Set("Content-Type", "application/wasm")
+   }
+   ```
+
+## Getting More Help
+
+<CardGroup cols={2}>
+  <Card title="Community Support" icon="discord" href="/resources/community">
+    Ask questions in Discord
+  </Card>
+  <Card title="FAQ" icon="question" href="/resources/faq">
+    Check frequently asked questions
+  </Card>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/pion/webrtc/issues">
+    Report bugs or request features
+  </Card>
+  <Card title="Examples" icon="code" href="https://github.com/pion/webrtc/tree/master/examples">
+    Study working examples
+  </Card>
+</CardGroup>
+
+<Note>
+When asking for help, include:
+- Go version (`go version`)
+- Pion version (`go list -m github.com/pion/webrtc/v4`)
+- Minimal reproducible example
+- Relevant logs and error messages
+- Network topology (NAT, firewall, etc.)
+</Note>

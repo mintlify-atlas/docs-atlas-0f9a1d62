@@ -1,0 +1,398 @@
+---
+title: RTPSender
+description: Controls how a given Track is encoded and transmitted to a remote peer.
+---
+
+## Overview
+
+RTPSender allows an application to control how a given Track is encoded and transmitted to a remote peer. It manages the outbound RTP stream including encoding parameters, SSRC assignment, and RTCP feedback.
+
+## Type Definition
+
+```go
+type RTPSender struct {
+    trackEncodings []*trackEncoding
+    transport      *DTLSTransport
+    payloadType    PayloadType
+    kind           RTPCodecType
+    negotiated     bool
+    api            *API
+    id             string
+    rtpTransceiver *RTPTransceiver
+    mu             sync.RWMutex
+    sendCalled     chan struct{}
+    stopCalled     chan struct{}
+}
+```
+
+## Constructor
+
+### NewRTPSender
+
+Constructs a new RTPSender.
+
+```go
+func (api *API) NewRTPSender(track TrackLocal, transport *DTLSTransport) (*RTPSender, error)
+```
+
+<ParamField path="track" type="TrackLocal" required>
+  The local track to send
+</ParamField>
+
+<ParamField path="transport" type="*DTLSTransport" required>
+  The DTLS transport to use for sending
+</ParamField>
+
+<ResponseField name="sender" type="*RTPSender">
+  The newly created RTPSender
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if track or transport is nil
+</ResponseField>
+
+## Methods
+
+### Transport
+
+Returns the currently-configured DTLSTransport or nil if one has not yet been configured.
+
+```go
+func (r *RTPSender) Transport() *DTLSTransport
+```
+
+<ResponseField name="transport" type="*DTLSTransport">
+  The associated DTLS transport
+</ResponseField>
+
+### GetParameters
+
+Describes the current configuration for the encoding and transmission of media on the sender's track.
+
+```go
+func (r *RTPSender) GetParameters() RTPSendParameters
+```
+
+<ResponseField name="parameters" type="RTPSendParameters">
+  The current send parameters including codecs and encodings
+</ResponseField>
+
+<Expandable title="RTPSendParameters Structure">
+```go
+type RTPSendParameters struct {
+    RTPParameters
+    Encodings []RTPEncodingParameters
+}
+
+type RTPEncodingParameters struct {
+    RTPCodingParameters
+    // Additional encoding-specific parameters
+}
+```
+</Expandable>
+
+### Track
+
+Returns the RTPSender's track, or nil.
+
+```go
+func (r *RTPSender) Track() TrackLocal
+```
+
+<ResponseField name="track" type="TrackLocal">
+  The local track being sent, or nil
+</ResponseField>
+
+### ReplaceTrack
+
+Replaces the track currently being used as the sender's source with a new TrackLocal. The new track must be of the same media kind (audio, video, etc) and switching the track should not require negotiation.
+
+```go
+func (r *RTPSender) ReplaceTrack(track TrackLocal) error
+```
+
+<ParamField path="track" type="TrackLocal">
+  The new track to send. Pass nil to stop sending.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if:
+  - New track has incorrect kind
+  - New track has incorrect envelope (simulcast)
+  - Track binding fails
+</ResponseField>
+
+<CodeGroup>
+```go Replace Track
+// Create new track
+newTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+// Replace the current track
+err = sender.ReplaceTrack(newTrack)
+if err != nil {
+    panic(err)
+}
+```
+
+```go Stop Sending
+// Stop sending by replacing with nil
+err := sender.ReplaceTrack(nil)
+```
+</CodeGroup>
+
+### AddEncoding
+
+Adds an encoding to RTPSender. Used by simulcast senders.
+
+```go
+func (r *RTPSender) AddEncoding(track TrackLocal) error
+```
+
+<ParamField path="track" type="TrackLocal" required>
+  The additional track encoding to add. Must have a RID set.
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if:
+  - Track is nil
+  - Track RID is empty
+  - Sender is stopped
+  - Send already called
+  - No base encoding exists
+  - Track properties don't match base encoding
+  - RID collision detected
+</ResponseField>
+
+<Note>
+AddEncoding is used for simulcast streaming where multiple encodings of the same track are sent with different quality levels.
+</Note>
+
+### Send
+
+Attempts to set the parameters controlling the sending of media.
+
+```go
+func (r *RTPSender) Send(parameters RTPSendParameters) error
+```
+
+<ParamField path="parameters" type="RTPSendParameters" required>
+  The send parameters to configure
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Returns error if Send has already been called or track was removed
+</ResponseField>
+
+### Stop
+
+Irreversibly stops the RTPSender.
+
+```go
+func (r *RTPSender) Stop() error
+```
+
+<ResponseField name="error" type="error">
+  Returns error if stopping fails
+</ResponseField>
+
+### Read
+
+Reads incoming RTCP for this RTPSender.
+
+```go
+func (r *RTPSender) Read(b []byte) (n int, a interceptor.Attributes, err error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Buffer to read RTCP data into
+</ParamField>
+
+<ResponseField name="n" type="int">
+  Number of bytes read
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes associated with the RTCP packet
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if read fails or sender is stopped
+</ResponseField>
+
+### ReadRTCP
+
+A convenience method that wraps Read and unmarshals for you.
+
+```go
+func (r *RTPSender) ReadRTCP() ([]rtcp.Packet, interceptor.Attributes, error)
+```
+
+<ResponseField name="packets" type="[]rtcp.Packet">
+  The unmarshaled RTCP packets
+</ResponseField>
+
+<ResponseField name="attributes" type="interceptor.Attributes">
+  Interceptor attributes
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Returns error if read or unmarshal fails
+</ResponseField>
+
+<CodeGroup>
+```go Read RTCP Feedback
+for {
+    packets, _, err := sender.ReadRTCP()
+    if err != nil {
+        return err
+    }
+    
+    for _, packet := range packets {
+        switch p := packet.(type) {
+        case *rtcp.PictureLossIndication:
+            fmt.Println("Received PLI")
+        case *rtcp.ReceiverReport:
+            fmt.Printf("Received RR: %+v\n", p)
+        }
+    }
+}
+```
+</CodeGroup>
+
+### ReadSimulcast
+
+Reads incoming RTCP for this RTPSender for given RID.
+
+```go
+func (r *RTPSender) ReadSimulcast(b []byte, rid string) (n int, a interceptor.Attributes, err error)
+```
+
+<ParamField path="b" type="[]byte" required>
+  Buffer to read RTCP data into
+</ParamField>
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier to read RTCP for
+</ParamField>
+
+### ReadSimulcastRTCP
+
+A convenience method that wraps ReadSimulcast and unmarshal for you.
+
+```go
+func (r *RTPSender) ReadSimulcastRTCP(rid string) ([]rtcp.Packet, interceptor.Attributes, error)
+```
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier
+</ParamField>
+
+### SetReadDeadline
+
+Sets the deadline for the Read operation. Setting to zero means no deadline.
+
+```go
+func (r *RTPSender) SetReadDeadline(t time.Time) error
+```
+
+<ParamField path="t" type="time.Time" required>
+  The deadline time. Zero value means no deadline.
+</ParamField>
+
+### SetReadDeadlineSimulcast
+
+Sets the max amount of time the RTCP stream for a given RID will block before returning. 0 is forever.
+
+```go
+func (r *RTPSender) SetReadDeadlineSimulcast(deadline time.Time, rid string) error
+```
+
+<ParamField path="deadline" type="time.Time" required>
+  The deadline time
+</ParamField>
+
+<ParamField path="rid" type="string" required>
+  The RTP stream identifier
+</ParamField>
+
+## Usage Examples
+
+### Creating and Using an RTPSender
+
+```go
+// Create a video track
+videoTrack, err := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+if err != nil {
+    panic(err)
+}
+
+// Add track to peer connection
+rtpSender, err := peerConnection.AddTrack(videoTrack)
+if err != nil {
+    panic(err)
+}
+
+// Read RTCP packets in a separate goroutine
+go func() {
+    for {
+        packets, _, err := rtpSender.ReadRTCP()
+        if err != nil {
+            return
+        }
+        
+        for _, pkt := range packets {
+            // Handle RTCP feedback
+            fmt.Printf("Received RTCP: %T\n", pkt)
+        }
+    }
+}()
+```
+
+### Simulcast Sending
+
+```go
+// Create base track with RID
+baseTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+baseTrack.SetRID("high")
+
+rtpSender, _ := peerConnection.AddTrack(baseTrack)
+
+// Add medium quality encoding
+mediumTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+mediumTrack.SetRID("medium")
+rtpSender.AddEncoding(mediumTrack)
+
+// Add low quality encoding
+lowTrack, _ := webrtc.NewTrackLocalStaticSample(
+    webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeVP8},
+    "video",
+    "pion",
+)
+lowTrack.SetRID("low")
+rtpSender.AddEncoding(lowTrack)
+```
+
+## See Also
+
+- [RTPReceiver](/api/rtp-receiver) - Manages inbound RTP streams
+- [RTPTransceiver](/api/rtp-transceiver) - Combines sender and receiver
+- [TrackLocal](/api/track-local) - Local media track interface
